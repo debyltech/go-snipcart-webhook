@@ -28,8 +28,12 @@ steps:
           - cron
       branch:
         - master
+
+trigger:
+  branch:
+  - master
 ---
 kind: signature
-hmac: 89aec43128ea886b9442415ff2a1ffa2ecc85b6c8b73c5de55608c9166cbd4b4
+hmac: 7c441a70c80f0e743c67302bbcfd4799605db5913e499cd815c206ace5406b90
 
 ...
