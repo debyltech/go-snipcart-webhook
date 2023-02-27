@@ -139,6 +139,7 @@ func HandleShippingRates(config *webhook.Config, shippoClient *shippo.Client) gi
 }
 
 func main() {
+	bindPort := flag.String("bind", "8080", "port to bind to")
 	releaseMode := flag.Bool("release", false, "true if setting gin to release mode")
 	configPath := flag.String("config", "", "path to config.json")
 	flag.Parse()
@@ -167,5 +168,5 @@ func main() {
 		}
 	}
 
-	r.Run("localhost:8081")
+	r.Run(fmt.Sprintf(":%s", *bindPort))
 }
