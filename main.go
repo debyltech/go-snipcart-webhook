@@ -39,7 +39,7 @@ func ValidateWebhook(token string) error {
 	}
 
 	if validateRequest.StatusCode < 200 || validateRequest.StatusCode >= 300 {
-		return errors.New("non-2XX response received")
+		return fmt.Errorf("non-2XX status code: %d", validateRequest.StatusCode)
 	}
 
 	return nil
