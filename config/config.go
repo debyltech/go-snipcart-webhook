@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	SnipcartApiKey     string         `json:"snipcart_api_key"`
 	ShippoApiKey       string         `json:"shippo_api_key"`
 	WeightUnit         string         `json:"weight_unit"`
 	DimensionUnit      string         `json:"dimension_unit"`

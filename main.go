@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -32,14 +33,24 @@ type ShippingRatesResponse struct {
 	DeliveryDays int     `json:"guaranteedDaysToDelivery"`
 }
 
-func ValidateWebhook(token string) error {
-	validateRequest, err := http.Get(ValidateUrl + token)
+func ValidateWebhook(token string, snipcartApiKey string) error {
+	validateRequest, err := http.NewRequest("GET", ValidateUrl+token, nil)
 	if err != nil {
 		return err
 	}
 
-	if validateRequest.StatusCode < 200 || validateRequest.StatusCode >= 300 {
-		return fmt.Errorf("non-2XX status code: %d", validateRequest.StatusCode)
+	client := &http.Client{}
+
+	auth := base64.StdEncoding.EncodeToString([]byte(snipcartApiKey + ":"))
+	validateRequest.Header.Set("Authorization", fmt.Sprintf("Basic %s", auth))
+
+	validateResponse, err := client.Do(validateRequest)
+	if err != nil {
+		return err
+	}
+
+	if validateResponse.StatusCode < 200 || validateResponse.StatusCode >= 300 {
+		return fmt.Errorf("non-2XX status code: %d", validateResponse.StatusCode)
 	}
 
 	return nil
