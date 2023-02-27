@@ -14,5 +14,4 @@ RUN apk add --no-cache go git && \
 RUN rm go.mod go.sum *.go
 
 VOLUME ["/conf"]
-ENTRYPOINT "/bin/snipcart-webhook-server"
-CMD ["-config", "/conf/config.json"]
+ENTRYPOINT ["/bin/snipcart-webhook-server"]
