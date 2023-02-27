@@ -1,0 +1,30 @@
+---
+kind: pipeline
+type: docker
+name: default
+
+clone:
+  disable: true
+
+steps:
+  - name: clone
+    image: docker.io/bdebyl/alpine-git
+    commands:
+      - git clone https://github.com/debyltech/go-snipcart-webhook.git .
+      - git checkout $DRONE_COMMIT
+      - echo -n "0.1.$DRONE_BUILD_NUMBER" > .tags
+
+  - name: publish
+    image: plugins/docker
+    settings:
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_password
+      repo: debyltech/go-snipcart-webhook
+    when:
+      event:
+        exclude:
+          - cron
+      branch:
+        - master
