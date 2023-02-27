@@ -32,8 +32,10 @@ steps:
 trigger:
   branch:
   - master
+  event:
+  - push
 ---
 kind: signature
-hmac: 7c441a70c80f0e743c67302bbcfd4799605db5913e499cd815c206ace5406b90
+hmac: c43dc6b6d0629cb932123aebcc9a7cac21f3811caf456a4d1a28b454ba4b7a17
 
 ...
