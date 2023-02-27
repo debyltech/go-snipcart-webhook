@@ -139,6 +139,7 @@ func HandleShippingRates(config *webhook.Config, shippoClient *shippo.Client) gi
 }
 
 func main() {
+	releaseMode := flag.Bool("release", false, "true if setting gin to release mode")
 	configPath := flag.String("config", "", "path to config.json")
 	flag.Parse()
 
@@ -153,6 +154,9 @@ func main() {
 
 	shippoClient := shippo.NewClient(config.ShippoApiKey)
 
+	if *releaseMode {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	r := gin.Default()
 
 	api := r.Group("/api")
