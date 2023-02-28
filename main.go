@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/debyltech/go-shippr/shippo"
+	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
-	"github.com/debyltech/go-snipcart/snipcart/webhook"
 	"github.com/gin-gonic/gin"
 )
 
@@ -56,14 +56,14 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 	return nil
 }
 
-func HandleShippingRates(config *webhook.Config, shippoClient *shippo.Client) gin.HandlerFunc {
+func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
 			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
 			return
 		}
-		err := ValidateWebhook(validationHeader)
+		err := ValidateWebhook(validationHeader, config.SnipcartApiKey)
 		if err != nil {
 			c.AbortWithError(http.StatusBadRequest, err)
 			return
@@ -159,7 +159,7 @@ func main() {
 		log.Fatal("config path not defined")
 	}
 
-	config, err := webhook.NewConfigFromFile(*configPath)
+	config, err := config.NewConfigFromFile(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
