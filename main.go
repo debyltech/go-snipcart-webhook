@@ -28,10 +28,14 @@ type ShippingWebhookEvent struct {
 	Order     snipcart.SnipcartOrder `json:"content"`
 }
 
-type ShippingRatesResponse struct {
+type ShippingRate struct {
 	Cost         float64 `json:"cost"`
 	Description  string  `json:"description"`
 	DeliveryDays int     `json:"guaranteedDaysToDelivery"`
+}
+
+type ShippingRatesResponse struct {
+	Rates []ShippingRate `json:"rates"`
 }
 
 func ValidateWebhook(token string, snipcartApiKey string) error {
@@ -131,21 +135,21 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			return
 		}
 
-		var rates []ShippingRatesResponse
+		var shippingRates ShippingRatesResponse
 		for _, v := range rateResponse.Rates {
 			cost, err := strconv.ParseFloat(v.Amount, 64)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
 			}
-			rates = append(rates, ShippingRatesResponse{
+			shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
 				Cost:         cost,
 				Description:  v.Title,
 				DeliveryDays: v.EstimatedDays,
 			})
 		}
 
-		c.JSON(http.StatusOK, rates)
+		c.JSON(http.StatusOK, shippingRates)
 	}
 
 	return fn
