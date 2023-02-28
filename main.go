@@ -43,6 +43,7 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 
 	auth := base64.StdEncoding.EncodeToString([]byte(snipcartApiKey + ":"))
 	validateRequest.Header.Set("Authorization", fmt.Sprintf("Basic %s", auth))
+	validateRequest.Header.Set("Accept", "application/json")
 
 	validateResponse, err := client.Do(validateRequest)
 	if err != nil {
