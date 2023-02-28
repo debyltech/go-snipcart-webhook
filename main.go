@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +14,10 @@ import (
 	"github.com/debyltech/go-shippr/shippo"
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
+	"github.com/gin-contrib/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -69,15 +71,13 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
 			return
 		}
-		err := ValidateWebhook(validationHeader, config.SnipcartApiKey)
-		if err != nil {
+		if err := ValidateWebhook(validationHeader, config.SnipcartApiKey); err != nil {
 			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
 		var event ShippingWebhookEvent
-		err = json.NewDecoder(c.Request.Body).Decode(&event)
-		if err != nil {
+		if err := json.NewDecoder(c.Request.Body).Decode(&event); err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
 			return
 		}
@@ -129,6 +129,8 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			Parcel:    parcel,
 		}
 
+		log.Info().Interface("rate_request", rateRequest)
+
 		rateResponse, err := shippoClient.GenerateRates(rateRequest)
 		if err != nil {
 			c.AbortWithError(http.StatusBadRequest, fmt.Errorf("err: %v, request: %v", err, rateRequest))
@@ -147,6 +149,7 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 				Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
 			})
 		}
+		log.Info().Interface("shipping_rates", shippingRates)
 
 		c.JSON(http.StatusOK, shippingRates)
 	}
@@ -155,18 +158,20 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
 	bindPort := flag.String("bind", "8080", "port to bind to")
 	releaseMode := flag.Bool("release", false, "true if setting gin to release mode")
 	configPath := flag.String("config", "", "path to config.json")
 	flag.Parse()
 
 	if *configPath == "" {
-		log.Fatal("config path not defined")
+		log.Fatal().Msg("config path not defined")
 	}
 
 	config, err := config.NewConfigFromFile(*configPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err)
 	}
 
 	shippoClient := shippo.NewClient(config.ShippoApiKey)
@@ -174,7 +179,10 @@ func main() {
 	if *releaseMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery(), logger.SetLogger(logger.WithLogger(func(_ *gin.Context, l zerolog.Logger) zerolog.Logger {
+		return l.Output(gin.DefaultWriter).With().Logger()
+	})))
 
 	api := r.Group("/api")
 	{
@@ -184,5 +192,7 @@ func main() {
 		}
 	}
 
-	r.Run(fmt.Sprintf(":%s", *bindPort))
+	if err := r.Run(fmt.Sprintf(":%s", *bindPort)); err != nil {
+		log.Fatal().Err(err)
+	}
 }
