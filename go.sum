@@ -13,6 +13,8 @@ github.com/debyltech/go-shippr v0.1.0 h1:tinMX/HXulYU+7o3r5gtr5waHgWUONrmamFryy3
 github.com/debyltech/go-shippr v0.1.0/go.mod h1:OC6q2VpWvqO5gIQPkvI8bmGTZY4syYtT6W1qNby0Los=
 github.com/debyltech/go-snipcart v0.1.2 h1:0uOsgnJ6VBxWhMbvagUU9HKnYuwcPMwTsskBapv3q3I=
 github.com/debyltech/go-snipcart v0.1.2/go.mod h1:H2wIwQz7BM/69I5iOxJhB5bhwkl04f6ou6aqfLLF9q4=
+github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3 h1:RDKtdrqelH2bSIT4rD4GYRkVHxJI/31WtQdN9M2Ep2k=
+github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3/go.mod h1:qfCbFlr8WHU4g8PQ7D0FfFuQkcW6Sg6WVLZFY98Rc70=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=
 github.com/gin-gonic/gin v1.9.0 h1:OjyFBKICoexlu99ctXNR2gg+c5pKrKMuyjgARg9qeY8=
