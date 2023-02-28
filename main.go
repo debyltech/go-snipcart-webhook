@@ -24,6 +24,10 @@ const (
 	ValidateUrl string = "https://app.snipcart.com/api/requestvalidation/"
 )
 
+var (
+	ginlogger zerolog.Logger
+)
+
 type ShippingWebhookEvent struct {
 	EventName string                 `json:"eventName"`
 	CreatedOn time.Time              `json:"createdOn"`
@@ -129,7 +133,7 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			Parcel:    parcel,
 		}
 
-		log.Info().Interface("rate_request", rateRequest)
+		ginlogger.Info().Interface("rate_request", rateRequest)
 
 		rateResponse, err := shippoClient.GenerateRates(rateRequest)
 		if err != nil {
@@ -149,7 +153,7 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 				Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
 			})
 		}
-		log.Info().Interface("shipping_rates", shippingRates)
+		ginlogger.Info().Interface("shipping_rates", shippingRates)
 
 		c.JSON(http.StatusOK, shippingRates)
 	}
@@ -180,6 +184,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	ginlogger = zerolog.New(gin.DefaultWriter).With().Timestamp().Logger()
 	r.Use(gin.Recovery(), logger.SetLogger(logger.WithLogger(func(_ *gin.Context, l zerolog.Logger) zerolog.Logger {
 		return l.Output(gin.DefaultWriter).With().Logger()
 	})))
