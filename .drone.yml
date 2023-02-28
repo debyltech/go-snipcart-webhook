@@ -12,8 +12,7 @@ steps:
     commands:
       - git clone https://github.com/debyltech/go-snipcart-webhook.git .
       - git checkout $DRONE_COMMIT
-      - echo -n "0.1.$DRONE_BUILD_NUMBER" > .tags
-      - echo -n "latest" >> .tags
+      - echo -n "0.1.$DRONE_BUILD_NUMBER,latest" > .tags
 
   - name: publish
     image: plugins/docker
@@ -37,6 +36,6 @@ trigger:
   - push
 ---
 kind: signature
-hmac: 487e584b167ce8387fbdbfeb99bb05ccb4ee80eb12270c5d209625665498c373
+hmac: aaea7af5aeb21986d6caa5bc24551fafb1a24b7a815f05d8cce8eec10b0fc438
 
 ...
