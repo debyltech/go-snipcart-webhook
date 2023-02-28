@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/debyltech/go-shippr/shippo"
@@ -84,7 +85,7 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			lineItems = append(lineItems, shippo.LineItem{
 				Quantity:           v.Quantity,
 				TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
-				Currency:           event.Order.Currency,
+				Currency:           strings.ToUpper(event.Order.Currency),
 				Weight:             fmt.Sprintf("%.2f", v.Weight),
 				WeightUnit:         config.WeightUnit,
 				Title:              v.Name,
