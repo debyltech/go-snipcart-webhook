@@ -29,9 +29,9 @@ type ShippingWebhookEvent struct {
 }
 
 type ShippingRate struct {
-	Cost         float64 `json:"cost"`
-	Description  string  `json:"description"`
-	DeliveryDays int     `json:"guaranteedDaysToDelivery"`
+	Cost        float64 `json:"cost"`
+	Description string  `json:"description"`
+	// DeliveryDays int     `json:"guaranteedDaysToDelivery"`
 }
 
 type ShippingRatesResponse struct {
@@ -143,9 +143,8 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 				return
 			}
 			shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
-				Cost:         cost,
-				Description:  v.Title,
-				DeliveryDays: v.EstimatedDays,
+				Cost:        cost,
+				Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
 			})
 		}
 
