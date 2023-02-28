@@ -126,7 +126,7 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 
 		rateResponse, err := shippoClient.GenerateRates(rateRequest)
 		if err != nil {
-			c.AbortWithError(http.StatusBadRequest, err)
+			c.AbortWithError(http.StatusBadRequest, fmt.Errorf("err: %v, request: %v", err, rateRequest)
 			return
 		}
 
