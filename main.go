@@ -6,7 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,18 +18,11 @@ import (
 	"github.com/debyltech/go-shippr/shippo"
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
-	"github.com/gin-contrib/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 const (
 	ValidateUrl string = "https://app.snipcart.com/api/requestvalidation/"
-)
-
-var (
-	ginlogger zerolog.Logger
 )
 
 type ShippingWebhookEvent struct {
@@ -133,8 +130,6 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 			Parcel:    parcel,
 		}
 
-		ginlogger.Info().Interface("rate_request", rateRequest)
-
 		rateResponse, err := shippoClient.GenerateRates(rateRequest)
 		if err != nil {
 			c.AbortWithError(http.StatusBadRequest, fmt.Errorf("err: %v, request: %v", err, rateRequest))
@@ -153,7 +148,6 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 				Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
 			})
 		}
-		ginlogger.Info().Interface("shipping_rates", shippingRates)
 
 		c.JSON(http.StatusOK, shippingRates)
 	}
@@ -162,20 +156,26 @@ func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin
 }
 
 func main() {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-
 	bindPort := flag.String("bind", "8080", "port to bind to")
 	releaseMode := flag.Bool("release", false, "true if setting gin to release mode")
 	configPath := flag.String("config", "", "path to config.json")
+	logPath := flag.String("logfile", "/var/log/go-snipcart/access.log", "path to logfile")
+
 	flag.Parse()
 
+	logDir, logFile := filepath.Split(*logPath)
+	err := os.MkdirAll(logDir, os.ModePerm)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if *configPath == "" {
-		log.Fatal().Msg("config path not defined")
+		log.Fatal("config path not defined")
 	}
 
 	config, err := config.NewConfigFromFile(*configPath)
 	if err != nil {
-		log.Fatal().Err(err)
+		log.Fatal(err)
 	}
 
 	shippoClient := shippo.NewClient(config.ShippoApiKey)
@@ -183,21 +183,27 @@ func main() {
 	if *releaseMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	r := gin.New()
-	ginlogger = zerolog.New(gin.DefaultWriter).With().Timestamp().Logger()
-	r.Use(gin.Recovery(), logger.SetLogger(logger.WithLogger(func(_ *gin.Context, l zerolog.Logger) zerolog.Logger {
-		return l.Output(gin.DefaultWriter).With().Logger()
-	})))
+
+	f, err := os.Create(filepath.Join(logDir, logFile))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	gin.DefaultWriter = io.MultiWriter(os.Stdout, f)
+	r := gin.Default()
 
 	api := r.Group("/api")
 	{
 		v1 := api.Group("/v1")
 		{
-			v1.POST("/shipping", HandleShippingRates(config, &shippoClient))
+			shipping := v1.Group("/shipping")
+			{
+				shipping.POST("/rates", HandleShippingRates(config, &shippoClient))
+			}
 		}
 	}
 
 	if err := r.Run(fmt.Sprintf(":%s", *bindPort)); err != nil {
-		log.Fatal().Err(err)
+		log.Fatal(err)
 	}
 }
