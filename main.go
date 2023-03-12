@@ -212,10 +212,7 @@ func main() {
 
 	webhooks := r.Group("/webhooks")
 	{
-		snipcartWebhook := webhooks.Group("/snipcart")
-		{
-			snipcartWebhook.POST("/rates", RouteSnipcartWebhook(config, &shippoClient))
-		}
+		webhooks.POST("/snipcart", RouteSnipcartWebhook(config, &shippoClient))
 	}
 
 	if err := r.Run(fmt.Sprintf(":%s", *bindPort)); err != nil {
