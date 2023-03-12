@@ -25,6 +25,10 @@ const (
 	ValidateUrl string = "https://app.snipcart.com/api/requestvalidation/"
 )
 
+type WebhookEvent struct {
+	EventName string `json:"eventName"`
+}
+
 type ShippingWebhookEvent struct {
 	EventName string                 `json:"eventName"`
 	CreatedOn time.Time              `json:"createdOn"`
@@ -65,91 +69,105 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 	return nil
 }
 
-func HandleShippingRates(config *config.Config, shippoClient *shippo.Client) gin.HandlerFunc {
+func HandleShippingRates(body *io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (any, error) {
+	var event ShippingWebhookEvent
+	if err := json.NewDecoder(*body).Decode(&event); err != nil {
+		return nil, err
+	}
+
+	var lineItems []shippo.LineItem
+	for _, v := range event.Order.Items {
+		lineItems = append(lineItems, shippo.LineItem{
+			Quantity:           v.Quantity,
+			TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
+			Currency:           strings.ToUpper(event.Order.Currency),
+			Weight:             fmt.Sprintf("%.2f", v.Weight),
+			WeightUnit:         config.WeightUnit,
+			Title:              v.Name,
+			ManufactureCountry: config.ManufactureCountry,
+			Sku:                v.ID,
+		})
+	}
+
+	parcel := config.DefaultParcel
+	parcel.WeightUnit = config.WeightUnit
+	parcel.DistanceUnit = config.DimensionUnit
+	parcel.Weight = fmt.Sprintf("%.2f", event.Order.TotalWeight)
+
+	rateRequest := shippo.RateRequest{
+		AddressFrom: shippo.Address{
+			Name:       config.SenderAddress.Name,
+			Address1:   config.SenderAddress.Address1,
+			Address2:   config.SenderAddress.Address2,
+			City:       config.SenderAddress.City,
+			State:      config.SenderAddress.State,
+			Country:    config.SenderAddress.Country,
+			PostalCode: config.SenderAddress.PostalCode,
+		},
+		AddressTo: shippo.Address{
+			Name:       event.Order.Name,
+			Company:    event.Order.Company,
+			Address1:   event.Order.Address1,
+			Address2:   event.Order.Address2,
+			City:       event.Order.City,
+			Country:    event.Order.Country,
+			State:      event.Order.Province,
+			PostalCode: event.Order.PostalCode,
+			Phone:      event.Order.Phone,
+			Email:      event.Order.Email,
+		},
+		LineItems: lineItems,
+		Parcel:    parcel,
+	}
+
+	rateResponse, err := shippoClient.GenerateRates(rateRequest)
+	if err != nil {
+		return nil, fmt.Errorf("err: %v, request: %v", err, rateRequest)
+	}
+
+	var shippingRates ShippingRatesResponse
+	for _, v := range rateResponse.Rates {
+		cost, err := strconv.ParseFloat(v.Amount, 64)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
+			Cost:        cost,
+			Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
+		})
+	}
+
+	return shippingRates, nil
+}
+
+func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
 			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
-			return
 		}
 		if err := ValidateWebhook(validationHeader, config.SnipcartApiKey); err != nil {
 			c.AbortWithError(http.StatusBadRequest, err)
-			return
 		}
 
-		var event ShippingWebhookEvent
+		var event WebhookEvent
 		if err := json.NewDecoder(c.Request.Body).Decode(&event); err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
-			return
 		}
 
 		defer c.Request.Body.Close()
 
-		var lineItems []shippo.LineItem
-		for _, v := range event.Order.Items {
-			lineItems = append(lineItems, shippo.LineItem{
-				Quantity:           v.Quantity,
-				TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
-				Currency:           strings.ToUpper(event.Order.Currency),
-				Weight:             fmt.Sprintf("%.2f", v.Weight),
-				WeightUnit:         config.WeightUnit,
-				Title:              v.Name,
-				ManufactureCountry: config.ManufactureCountry,
-				Sku:                v.ID,
-			})
-		}
-
-		parcel := config.DefaultParcel
-		parcel.WeightUnit = config.WeightUnit
-		parcel.DistanceUnit = config.DimensionUnit
-		parcel.Weight = fmt.Sprintf("%.2f", event.Order.TotalWeight)
-
-		rateRequest := shippo.RateRequest{
-			AddressFrom: shippo.Address{
-				Name:       config.SenderAddress.Name,
-				Address1:   config.SenderAddress.Address1,
-				Address2:   config.SenderAddress.Address2,
-				City:       config.SenderAddress.City,
-				State:      config.SenderAddress.State,
-				Country:    config.SenderAddress.Country,
-				PostalCode: config.SenderAddress.PostalCode,
-			},
-			AddressTo: shippo.Address{
-				Name:       event.Order.Name,
-				Company:    event.Order.Company,
-				Address1:   event.Order.Address1,
-				Address2:   event.Order.Address2,
-				City:       event.Order.City,
-				Country:    event.Order.Country,
-				State:      event.Order.Province,
-				PostalCode: event.Order.PostalCode,
-				Phone:      event.Order.Phone,
-				Email:      event.Order.Email,
-			},
-			LineItems: lineItems,
-			Parcel:    parcel,
-		}
-
-		rateResponse, err := shippoClient.GenerateRates(rateRequest)
-		if err != nil {
-			c.AbortWithError(http.StatusBadRequest, fmt.Errorf("err: %v, request: %v", err, rateRequest))
-			return
-		}
-
-		var shippingRates ShippingRatesResponse
-		for _, v := range rateResponse.Rates {
-			cost, err := strconv.ParseFloat(v.Amount, 64)
+		switch event.EventName {
+		case "order.completed":
+			c.AbortWithStatus(http.StatusNotImplemented)
+		case "shippingrates.fetch":
+			response, err := HandleShippingRates(&c.Request.Body, config, shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
-				return
 			}
-			shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
-				Cost:        cost,
-				Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
-			})
-		}
 
-		c.JSON(http.StatusOK, shippingRates)
+			c.JSON(http.StatusOK, response)
+		}
 	}
 
 	return fn
@@ -192,14 +210,11 @@ func main() {
 	gin.DefaultWriter = io.MultiWriter(os.Stdout, f)
 	r := gin.Default()
 
-	api := r.Group("/api")
+	webhooks := r.Group("/webhooks")
 	{
-		v1 := api.Group("/v1")
+		snipcartWebhook := webhooks.Group("/snipcart")
 		{
-			shipping := v1.Group("/shipping")
-			{
-				shipping.POST("/rates", HandleShippingRates(config, &shippoClient))
-			}
+			snipcartWebhook.POST("/rates", RouteSnipcartWebhook(config, &shippoClient))
 		}
 	}
 
