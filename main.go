@@ -19,6 +19,7 @@ import (
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
 	"github.com/gin-gonic/gin"
+	"github.com/ztrue/tracerr"
 )
 
 const (
@@ -48,7 +49,7 @@ type ShippingRatesResponse struct {
 func ValidateWebhook(token string, snipcartApiKey string) error {
 	validateRequest, err := http.NewRequest("GET", ValidateUrl+token, nil)
 	if err != nil {
-		return err
+		return tracerr.Wrap(err)
 	}
 
 	client := &http.Client{}
@@ -59,11 +60,11 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 
 	validateResponse, err := client.Do(validateRequest)
 	if err != nil {
-		return err
+		return tracerr.Wrap(err)
 	}
 
 	if validateResponse.StatusCode < 200 || validateResponse.StatusCode >= 300 {
-		return fmt.Errorf("non-2XX status code: %d", validateResponse.StatusCode)
+		return tracerr.Wrap(fmt.Errorf("non-2XX status code: %d", validateResponse.StatusCode))
 	}
 
 	return nil
@@ -72,7 +73,7 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 func HandleShippingRates(body *io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (any, error) {
 	var event ShippingWebhookEvent
 	if err := json.NewDecoder(*body).Decode(&event); err != nil {
-		return nil, err
+		return nil, tracerr.Wrap(err)
 	}
 
 	var lineItems []shippo.LineItem
@@ -122,14 +123,14 @@ func HandleShippingRates(body *io.ReadCloser, config *config.Config, shippoClien
 
 	rateResponse, err := shippoClient.GenerateRates(rateRequest)
 	if err != nil {
-		return nil, fmt.Errorf("err: %v, request: %v", err, rateRequest)
+		return nil, tracerr.Wrap(fmt.Errorf("err: %v, request: %v", err, rateRequest))
 	}
 
 	var shippingRates ShippingRatesResponse
 	for _, v := range rateResponse.Rates {
 		cost, err := strconv.ParseFloat(v.Amount, 64)
 		if err != nil {
-			return http.StatusInternalServerError, err
+			return nil, tracerr.Wrap(err)
 		}
 		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
 			Cost:        cost,
@@ -144,16 +145,18 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
-			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
+			c.AbortWithError(http.StatusBadRequest, tracerr.Wrap(errors.New("missing X-Snipcart-RequestToken header")))
 		}
 		if err := ValidateWebhook(validationHeader, config.SnipcartApiKey); err != nil {
-			c.AbortWithError(http.StatusBadRequest, err)
+			c.AbortWithError(http.StatusBadRequest, tracerr.Wrap(err))
 		}
 
 		var event WebhookEvent
 		if err := json.NewDecoder(c.Request.Body).Decode(&event); err != nil {
-			c.AbortWithError(http.StatusInternalServerError, err)
+			c.AbortWithError(http.StatusInternalServerError, tracerr.Wrap(err))
 		}
+
+		defer c.Request.Body.Close()
 
 		switch event.EventName {
 		case "order.completed":
@@ -162,12 +165,11 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 			response, err := HandleShippingRates(&c.Request.Body, config, shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
+				return
 			}
 
 			c.JSON(http.StatusOK, response)
 		}
-
-		defer c.Request.Body.Close()
 	}
 
 	return fn
