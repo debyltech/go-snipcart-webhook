@@ -155,8 +155,6 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 			c.AbortWithError(http.StatusInternalServerError, err)
 		}
 
-		defer c.Request.Body.Close()
-
 		switch event.EventName {
 		case "order.completed":
 			c.AbortWithStatus(http.StatusNotImplemented)
@@ -168,6 +166,8 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 
 			c.JSON(http.StatusOK, response)
 		}
+
+		defer c.Request.Body.Close()
 	}
 
 	return fn
