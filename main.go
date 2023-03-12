@@ -69,9 +69,9 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 	return nil
 }
 
-func HandleShippingRates(body *io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (any, error) {
+func HandleShippingRates(body io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (any, error) {
 	var event ShippingWebhookEvent
-	if err := json.NewDecoder(*body).Decode(&event); err != nil {
+	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return nil, fmt.Errorf("error with shipping event decode: %s", err.Error())
 	}
 
@@ -162,7 +162,7 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 		case "order.completed":
 			c.AbortWithStatus(http.StatusNotImplemented)
 		case "shippingrates.fetch":
-			response, err := HandleShippingRates(&c.Request.Body, config, shippoClient)
+			response, err := HandleShippingRates(c.Request.Body, config, shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("error with handling shipping rates: %s", err.Error()))
 				return
