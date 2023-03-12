@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -152,9 +154,12 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 			return
 		}
 
-		var requestBody io.ReadCloser = c.Request.Body
+		rawBody, err := ioutil.ReadAll(c.Request.Body)
+		if err != nil {
+			c.AbortWithError(http.StatusInternalServerError, err)
+		}
 		var event WebhookEvent
-		if err := json.NewDecoder(c.Request.Body).Decode(&event); err != nil {
+		if err := json.NewDecoder(ioutil.NopCloser(bytes.NewBuffer(rawBody))).Decode(&event); err != nil {
 			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("error decoding generic webhook event: %s", err.Error()))
 			return
 		}
@@ -163,7 +168,7 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 		case "order.completed":
 			c.AbortWithStatus(http.StatusNotImplemented)
 		case "shippingrates.fetch":
-			response, err := HandleShippingRates(requestBody, config, shippoClient)
+			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), config, shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("error with handling shipping rates: %s", err.Error()))
 				return
@@ -171,8 +176,6 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 
 			c.JSON(http.StatusOK, response)
 		}
-
-		requestBody.Close()
 	}
 
 	return fn
