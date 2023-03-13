@@ -3,8 +3,8 @@ module github.com/debyltech/go-snipcart-webhook
 go 1.19
 
 require (
-	github.com/debyltech/go-shippr v0.1.0
-	github.com/debyltech/go-snipcart v0.1.2
+	github.com/debyltech/go-shippr v0.1.3
+	github.com/debyltech/go-snipcart v0.1.9
 	github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3
 	github.com/gin-gonic/gin v1.9.0
 )
