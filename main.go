@@ -2,50 +2,48 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
+	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
 	"github.com/debyltech/go-shippr/shippo"
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	ValidateUrl string = "https://app.snipcart.com/api/requestvalidation/"
-)
-
 type WebhookEvent struct {
 	EventName string `json:"eventName"`
 }
 
-type ShippingWebhookEvent struct {
+type ShippingRateFetchWebhookEvent struct {
 	EventName string                 `json:"eventName"`
 	CreatedOn time.Time              `json:"createdOn"`
 	Order     snipcart.SnipcartOrder `json:"content"`
 }
 
 type OrderCompleteWebhookEvent struct {
-	EventName string                             `json:"eventName"`
-	CreatedOn time.Time                          `json:"createdOn"`
-	Content   snipcart.SnipcartOrderEventContent `json:"content"`
+	EventName string                 `json:"eventName"`
+	CreatedOn time.Time              `json:"createdOn"`
+	Order     snipcart.SnipcartOrder `json:"content"`
 }
 
 type ShippingRate struct {
+	Id          string  `json:"userDefinedId"`
 	Cost        float64 `json:"cost"`
 	Description string  `json:"description"`
+	// We cannot guarantee days to delivery, kept here for debug future
 	// DeliveryDays int     `json:"guaranteedDaysToDelivery"`
 }
 
@@ -77,144 +75,113 @@ func ValidateWebhook(token string, snipcartApiKey string) error {
 	return nil
 }
 
-func HandleShippingRates(body io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (any, error) {
-	var event ShippingWebhookEvent
+func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, error) {
+	var event ShippingRateFetchWebhookEvent
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
-		return nil, fmt.Errorf("error with shipping event decode: %s", err.Error())
+		return http.StatusInternalServerError, fmt.Errorf("error with shipping rate fetch event decode: %s", err.Error())
 	}
+	jsonString, _ := json.Marshal(event)
+	DebugPrintln(string(jsonString))
 
 	var lineItems []shippo.LineItem
 	for _, v := range event.Order.Items {
+		if !v.Shippable {
+			DebugPrintf("order %s item %s not shippable, skipping\n", event.Order.Token, v.Name)
+			continue
+		}
+
 		lineItems = append(lineItems, shippo.LineItem{
 			Quantity:           v.Quantity,
 			TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
 			Currency:           strings.ToUpper(event.Order.Currency),
 			Weight:             fmt.Sprintf("%.2f", v.Weight),
-			WeightUnit:         config.WeightUnit,
+			WeightUnit:         webhookConfig.WeightUnit,
 			Title:              v.Name,
-			ManufactureCountry: config.ManufactureCountry,
+			ManufactureCountry: webhookConfig.ManufactureCountry,
 			Sku:                v.ID,
 		})
 	}
 
-	parcel := config.DefaultParcel
-	parcel.WeightUnit = config.WeightUnit
-	parcel.DistanceUnit = config.DimensionUnit
+	if len(lineItems) <= 0 {
+		return http.StatusOK, nil
+	}
+
+	parcel := webhookConfig.DefaultParcel
+	parcel.WeightUnit = webhookConfig.WeightUnit
+	parcel.DistanceUnit = webhookConfig.DimensionUnit
 	parcel.Weight = fmt.Sprintf("%.2f", event.Order.TotalWeight)
 
-	rateRequest := shippo.RateRequest{
+	shipmentRequest := shippo.Shipment{
 		AddressFrom: shippo.Address{
-			Name:       config.SenderAddress.Name,
-			Address1:   config.SenderAddress.Address1,
-			Address2:   config.SenderAddress.Address2,
-			City:       config.SenderAddress.City,
-			State:      config.SenderAddress.State,
-			Country:    config.SenderAddress.Country,
-			PostalCode: config.SenderAddress.PostalCode,
+			Name:       webhookConfig.SenderAddress.Name,
+			Address1:   webhookConfig.SenderAddress.Address1,
+			Address2:   webhookConfig.SenderAddress.Address2,
+			City:       webhookConfig.SenderAddress.City,
+			State:      webhookConfig.SenderAddress.State,
+			Country:    webhookConfig.SenderAddress.Country,
+			PostalCode: webhookConfig.SenderAddress.PostalCode,
 		},
 		AddressTo: shippo.Address{
-			Name:       event.Order.Name,
-			Company:    event.Order.Company,
-			Address1:   event.Order.Address1,
-			Address2:   event.Order.Address2,
-			City:       event.Order.City,
-			Country:    event.Order.Country,
-			State:      event.Order.Province,
-			PostalCode: event.Order.PostalCode,
-			Phone:      event.Order.Phone,
+			Name:       event.Order.ShippingAddress.Name,
+			Company:    event.Order.ShippingAddress.Company,
+			Address1:   event.Order.ShippingAddress.Address1,
+			Address2:   event.Order.ShippingAddress.Address2,
+			City:       event.Order.ShippingAddress.City,
+			Country:    event.Order.ShippingAddress.Country,
+			State:      event.Order.ShippingAddress.Province,
+			PostalCode: event.Order.ShippingAddress.PostalCode,
+			Phone:      event.Order.ShippingAddress.Phone,
 			Email:      event.Order.Email,
 		},
-		LineItems: lineItems,
-		Parcel:    parcel,
+		Parcels: []shippo.Parcel{*parcel},
 	}
 
-	rateResponse, err := shippoClient.GenerateRates(rateRequest)
+	shipmentResponse, err := shippoClient.CreateShipment(shipmentRequest)
 	if err != nil {
-		return nil, fmt.Errorf("error with generating rates: %s; request: %v", err.Error(), rateRequest)
+		return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
 	}
 
+	// TODO: never-nest
 	var shippingRates ShippingRatesResponse
-	for _, v := range rateResponse.Rates {
-		cost, err := strconv.ParseFloat(v.Amount, 64)
+	for _, rate := range shipmentResponse.Rates {
+		if !webhookConfig.ServiceLevelAllowed(rate.ServiceLevel.Token) {
+			continue
+		}
+
+		cost, err := strconv.ParseFloat(rate.Amount, 64)
 		if err != nil {
 			return nil, fmt.Errorf("error with parsing float in shipping rates: %s", err.Error())
 		}
+
 		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
+			Id:          fmt.Sprintf("%s;%s", shipmentResponse.Id, rate.Id),
 			Cost:        cost,
-			Description: fmt.Sprintf("%s - Estimated arrival in %d days", v.Title, v.EstimatedDays),
+			Description: fmt.Sprintf("%s - Estimated arrival in %d days", rate.ServiceLevel.Name, rate.EstimatedDays),
 		})
 	}
 
 	return shippingRates, nil
 }
 
-func HandleOrderComplete(body io.ReadCloser, config *config.Config, shippoClient *shippo.Client) (int, error) {
+func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, error) {
 	var event OrderCompleteWebhookEvent
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
 	}
+	jsonString, _ := json.Marshal(event)
+	DebugPrintln(string(jsonString))
 
-	var lineItems []shippo.LineItem
-	for _, v := range event.Content.Items {
-		lineItems = append(lineItems, shippo.LineItem{
-			Quantity:           v.Quantity,
-			TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
-			Currency:           strings.ToUpper(event.Content.Currency),
-			Weight:             fmt.Sprintf("%.2f", v.Weight),
-			WeightUnit:         config.WeightUnit,
-			Title:              v.Name,
-			ManufactureCountry: config.ManufactureCountry,
-			Sku:                v.ID,
-		})
-	}
-
-	parcel := config.DefaultParcel
-	parcel.WeightUnit = config.WeightUnit
-	parcel.DistanceUnit = config.DimensionUnit
-	parcel.Weight = fmt.Sprintf("%.2f", event.Content.TotalWeight)
-
-	shipmentRequest := shippo.Shipment{
-		AddressFrom: shippo.Address{
-			Name:       config.SenderAddress.Name,
-			Address1:   config.SenderAddress.Address1,
-			Address2:   config.SenderAddress.Address2,
-			City:       config.SenderAddress.City,
-			State:      config.SenderAddress.State,
-			Country:    config.SenderAddress.Country,
-			PostalCode: config.SenderAddress.PostalCode,
-		},
-		AddressTo: shippo.Address{
-			Name:       event.Content.ShippingAddress.Name,
-			Company:    event.Content.ShippingAddress.Company,
-			Address1:   event.Content.ShippingAddress.Address1,
-			Address2:   event.Content.ShippingAddress.Address2,
-			City:       event.Content.ShippingAddress.City,
-			Country:    event.Content.ShippingAddress.Country,
-			State:      event.Content.ShippingAddress.Province,
-			PostalCode: event.Content.ShippingAddress.PostalCode,
-			Phone:      event.Content.ShippingAddress.Phone,
-			Email:      event.Content.Email,
-		},
-		Parcels: []shippo.Parcel{parcel},
-	}
-
-	_, err := shippoClient.CreateShipment(shipmentRequest)
-	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
-	}
-
-	// CREATE SHIPPO order
 	return http.StatusOK, nil
 }
 
-func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gin.HandlerFunc {
+func RouteSnipcartWebhook(shippoClient *shippo.Client) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
 			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
 			return
 		}
-		if err := ValidateWebhook(validationHeader, config.SnipcartApiKey); err != nil {
+		if err := ValidateWebhook(validationHeader, webhookConfig.SnipcartApiKey); err != nil {
 			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
@@ -231,7 +198,7 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 
 		switch event.EventName {
 		case "order.completed":
-			statusCode, err := HandleOrderComplete(ioutil.NopCloser(bytes.NewBuffer(rawBody)), config, shippoClient)
+			statusCode, err := HandleOrderComplete(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
 				c.AbortWithError(statusCode, err)
 				return
@@ -239,7 +206,7 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 
 			c.Data(statusCode, gin.MIMEHTML, nil)
 		case "shippingrates.fetch":
-			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), config, shippoClient)
+			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
@@ -252,49 +219,36 @@ func RouteSnipcartWebhook(config *config.Config, shippoClient *shippo.Client) gi
 	return fn
 }
 
-func main() {
-	bindPort := flag.String("bind", "8080", "port to bind to")
-	releaseMode := flag.Bool("release", false, "true if setting gin to release mode")
-	configPath := flag.String("config", "", "path to config.json")
-	logPath := flag.String("logfile", "/var/log/go-snipcart/access.log", "path to logfile")
-
-	flag.Parse()
-
-	logDir, logFile := filepath.Split(*logPath)
-	err := os.MkdirAll(logDir, os.ModePerm)
+func init() {
+	var err error
+	webhookConfig, err = config.NewConfigFromEnv(true)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Printf("[ERROR] %s\n", err.Error())
+		return
 	}
 
-	if *configPath == "" {
-		log.Fatal("config path not defined")
-	}
+	shippoClient := shippo.NewClient(webhookConfig.ShippoApiKey)
 
-	config, err := config.NewConfigFromFile(*configPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	shippoClient := shippo.NewClient(config.ShippoApiKey)
-
-	if *releaseMode {
+	if webhookConfig.Production {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	f, err := os.Create(filepath.Join(logDir, logFile))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	gin.DefaultWriter = io.MultiWriter(os.Stdout, f)
 	r := gin.Default()
 
-	webhooks := r.Group("/webhooks")
-	{
-		webhooks.POST("/snipcart", RouteSnipcartWebhook(config, &shippoClient))
-	}
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "ready",
+		})
+	})
+	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(&shippoClient))
 
-	if err := r.Run(fmt.Sprintf(":%s", *bindPort)); err != nil {
-		log.Fatal(err)
-	}
+	ginLambda = ginadapter.New(r)
+}
+
+func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	return ginLambda.ProxyWithContext(ctx, req)
+}
+
+func main() {
+	lambda.Start(Handler)
 }
