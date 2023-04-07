@@ -19,6 +19,19 @@ steps:
     commands:
       - CGO_ENABLED=0 go build -tags netgo
 
+  - name: deploy-dev
+    image: docker.io/bdebyl/awscli
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key
+    commands:
+      - apk add zip
+      - zip go-snipcart-webhook.zip go-snipcart-webhook
+      - aws lambda update-function-code --function-name go-snipcart-webhook --zip-file "fileb://go-snipcart-webhook.zip"
+
 trigger:
   branch:
   - master
@@ -26,6 +39,6 @@ trigger:
   - push
 ---
 kind: signature
-hmac: e2febb5bb6a638749e8054a808dc7ddf17b8707cf3017a281a7610c78ac0e05c
+hmac: dbec349e5e1a8b87d1de1cb753374461ef11c9a0fcf6045d83cc69e9c1b395cc
 
 ...
