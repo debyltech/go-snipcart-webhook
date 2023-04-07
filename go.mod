@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/aws/aws-lambda-go v1.19.1
 	github.com/awslabs/aws-lambda-go-api-proxy v0.14.0
-	github.com/debyltech/go-shippr v0.1.5
-	github.com/debyltech/go-snipcart v0.1.12
+	github.com/debyltech/go-shippr v0.1.9
+	github.com/debyltech/go-snipcart v0.1.13
 	github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3
 	github.com/gin-gonic/gin v1.9.0
 )

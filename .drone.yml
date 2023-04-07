@@ -14,20 +14,10 @@ steps:
       - git checkout $DRONE_COMMIT
       - echo -n "0.1.$DRONE_BUILD_NUMBER,latest" > .tags
 
-  - name: publish
-    image: plugins/docker
-    settings:
-      username:
-        from_secret: docker_username
-      password:
-        from_secret: docker_password
-      repo: debyltech/go-snipcart-webhook
-    when:
-      event:
-        exclude:
-          - cron
-      branch:
-        - master
+  - name: build
+    image: golang:1.20.3-nanoserver
+    commands:
+      - CGO_ENABLED=0 go build -tags netgo
 
 trigger:
   branch:
@@ -36,6 +26,6 @@ trigger:
   - push
 ---
 kind: signature
-hmac: aaea7af5aeb21986d6caa5bc24551fafb1a24b7a815f05d8cce8eec10b0fc438
+hmac: 868c254b7206bfbc2f9efd815822bbf10d6deaeb1b5862ff9f890bfc725c2af5
 
 ...

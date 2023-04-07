@@ -136,14 +136,38 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		Parcels: []shippo.Parcel{*parcel},
 	}
 
-	shipmentResponse, err := shippoClient.CreateShipment(shipmentRequest)
-	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
+	var err error
+	var shipmentResponse *shippo.Shipment
+	// Check if we already have a shipment
+	if event.Order.ShippingRateId != "" {
+		shipmentId := strings.Split(event.Order.ShippingRateId, ";")[0]
+		shipmentResponse, err = shippoClient.GetShipmentById(shipmentId)
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("error with fetching existing shipment: %s", err.Error())
+		}
+	} else {
+		shipmentResponse, err = shippoClient.CreateShipment(shipmentRequest)
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
+		}
 	}
 
-	// TODO: never-nest
+	if len(shipmentResponse.Messages) > 0 {
+		fmt.Printf("[WARNING] Shipment messages: %v\n", shipmentResponse.Messages)
+	}
+
+	err = shippoClient.AwaitQueuedFinished(shipmentResponse.Id)
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("error with awaiting shipment status: %s", err.Error())
+	}
+
+	ratesResponse, err := shippoClient.GetRatesForShipmentId(shipmentResponse.Id)
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("error with getting rates: %s", err.Error())
+	}
+
 	var shippingRates ShippingRatesResponse
-	for _, rate := range shipmentResponse.Rates {
+	for _, rate := range ratesResponse.Rates {
 		if !webhookConfig.ServiceLevelAllowed(rate.ServiceLevel.Token) {
 			continue
 		}
@@ -156,7 +180,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
 			Id:          fmt.Sprintf("%s;%s", shipmentResponse.Id, rate.Id),
 			Cost:        cost,
-			Description: fmt.Sprintf("%s - Estimated arrival in %d days", rate.ServiceLevel.Name, rate.EstimatedDays),
+			Description: fmt.Sprintf("%s %s - Estimated arrival in %d days", rate.Provider, rate.ServiceLevel.Name, rate.EstimatedDays),
 		})
 	}
 
@@ -172,6 +196,21 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 	DebugPrintln(string(jsonString))
 
 	return http.StatusOK, nil
+}
+
+func HandleTaxCalculation(body io.ReadCloser) (*snipcart.SnipcartWebhookTaxResponse, error) {
+	taxes := snipcart.SnipcartWebhookTaxResponse{
+		Taxes: []snipcart.SnipcartTax{
+			{
+				Name:             "New Hampshire (company does not meet threshold for sales tax in your state)",
+				Amount:           0.00,
+				NumberForInvoice: "TAX-000",
+				Rate:             0.0,
+			},
+		},
+	}
+
+	return &taxes, nil
 }
 
 func RouteSnipcartWebhook(shippoClient *shippo.Client) gin.HandlerFunc {
@@ -213,7 +252,16 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client) gin.HandlerFunc {
 			}
 
 			c.JSON(http.StatusOK, response)
+		case "taxes.calculate":
+			response, err := HandleTaxCalculation(ioutil.NopCloser(bytes.NewBuffer(rawBody)))
+			if err != nil {
+				c.AbortWithError(http.StatusInternalServerError, err)
+				return
+			}
+
+			c.JSON(http.StatusOK, response)
 		}
+
 	}
 
 	return fn
