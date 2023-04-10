@@ -12,4 +12,6 @@ const (
 var (
 	ginLambda     *ginadapter.GinLambda
 	webhookConfig *config.Config
+
+	BuildVersion = "development"
 )

@@ -1,7 +1,7 @@
 ---
 kind: pipeline
 type: docker
-name: default
+name: development
 
 clone:
   disable: true
@@ -12,12 +12,11 @@ steps:
     commands:
       - git clone https://github.com/debyltech/go-snipcart-webhook.git .
       - git checkout $DRONE_COMMIT
-      - echo -n "0.1.$DRONE_BUILD_NUMBER,latest" > .tags
 
   - name: build
     image: docker.io/golang:1.20.3
     commands:
-      - CGO_ENABLED=0 go build -tags netgo
+      - CGO_ENABLED=0 go build -tags netgo 
 
   - name: deploy-dev
     image: docker.io/bdebyl/awscli
@@ -31,14 +30,65 @@ steps:
       - apk add zip
       - zip go-snipcart-webhook.zip go-snipcart-webhook
       - aws lambda update-function-code --function-name go-snipcart-webhook --zip-file "fileb://go-snipcart-webhook.zip"
-
+    when:
+      branch:
+        - master
+      event:
+        exclude:
+          - pull_request
 trigger:
   branch:
-  - master
+    - master
   event:
-  - push
+    include:
+      - push
+    exclude:
+      - tag
+
+---
+kind: pipeline
+type: docker
+name: production
+
+clone:
+  disable: true
+
+steps:
+  - name: clone
+    image: docker.io/bdebyl/alpine-git
+    commands:
+      - git clone https://github.com/debyltech/go-snipcart-webhook.git .
+      - git checkout $DRONE_COMMIT
+      - echo -n "1.0.$DRONE_BUILD_NUMBER" > .tag
+
+  - name: build
+    image: docker.io/golang:1.20.3
+    commands:
+      - CGO_ENABLED=0 go build -tags netgo -ldflags "-X main.BuildVersion=$(cat .tag)"
+
+  - name: deploy-prod
+    image: docker.io/bdebyl/awscli
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key
+    commands:
+      - apk add zip
+      - zip go-snipcart-webhook.zip go-snipcart-webhook
+      - aws lambda update-function-code --function-name webhooks-prod --zip-file "fileb://go-snipcart-webhook.zip"
+trigger:
+  branch:
+    - master
+  event:
+    include:
+      - tag
+    exclude:
+      - push
+ 
 ---
 kind: signature
-hmac: dbec349e5e1a8b87d1de1cb753374461ef11c9a0fcf6045d83cc69e9c1b395cc
+hmac: 516de2bad3a9d3809584cf1e3d3fdb2519cfd07f9baa86bfd0a409f2487aff90
 
 ...

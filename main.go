@@ -286,6 +286,7 @@ func init() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message": "ready",
+			"version": BuildVersion,
 		})
 	})
 	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(&shippoClient))
