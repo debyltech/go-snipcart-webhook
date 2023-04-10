@@ -59,12 +59,11 @@ steps:
     commands:
       - git clone https://github.com/debyltech/go-snipcart-webhook.git .
       - git checkout $DRONE_COMMIT
-      - echo -n "1.0.$DRONE_BUILD_NUMBER" > .tag
 
   - name: build
     image: docker.io/golang:1.20.3
     commands:
-      - CGO_ENABLED=0 go build -tags netgo -ldflags "-X main.BuildVersion=$(cat .tag)"
+      - CGO_ENABLED=0 go build -tags netgo -ldflags "-X main.BuildVersion=$DRONE_TAG"
 
   - name: deploy-prod
     image: docker.io/bdebyl/awscli
@@ -89,6 +88,6 @@ trigger:
  
 ---
 kind: signature
-hmac: 516de2bad3a9d3809584cf1e3d3fdb2519cfd07f9baa86bfd0a409f2487aff90
+hmac: d52ec322829270043f36d3ede5940dbdeecc58cb8213f9864de35e2b93560f79
 
 ...
