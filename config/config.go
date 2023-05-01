@@ -25,6 +25,10 @@ type Config struct {
 	AwsSmsArn             string `env:"GSW_SMS_SECRET_ARN,unset"`
 	RateServiceLevels     string `env:"GSW_SERVICELEVELS" envDefault:"usps_first"`
 	RateServiceLevelsList []string
+	EIN                   string `env:"GSW_EIN,unset"`
+	VAT                   string `env:"GSW_VAT,unset"`
+	IOSS                  string `env:"GSW_IOSS,unset"`
+	CustomsVerifier       string `env:"GSW_CUSTOMSVERIFIER,unset"`
 }
 
 type WebhookSmsSecret struct {
