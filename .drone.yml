@@ -37,8 +37,6 @@ steps:
         exclude:
           - pull_request
 trigger:
-  branch:
-    - master
   event:
     include:
       - push
@@ -88,6 +86,6 @@ trigger:
  
 ---
 kind: signature
-hmac: d52ec322829270043f36d3ede5940dbdeecc58cb8213f9864de35e2b93560f79
+hmac: 788e32dc75461452129d711785e117655f4dee98246492a6b326f91ebbb7df00
 
 ...
