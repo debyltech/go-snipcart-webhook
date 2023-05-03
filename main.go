@@ -174,6 +174,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			State:      webhookConfig.SenderAddress.State,
 			Country:    webhookConfig.SenderAddress.Country,
 			PostalCode: webhookConfig.SenderAddress.PostalCode,
+			Phone:      webhookConfig.SenderAddress.Phone,
 		},
 		AddressTo: shippo.Address{
 			Name:       event.Order.ShippingAddress.Name,
@@ -258,8 +259,6 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
 	}
-	jsonString, _ := json.Marshal(event)
-	DebugPrintln(string(jsonString))
 
 	return http.StatusOK, nil
 }
