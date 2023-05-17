@@ -153,7 +153,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		// TODO(bastian): Add the TaxId override for EU/UK
 
 		var err error
-		customsDeclaration, err = shippoClient.CreatecustomsDeclaration(declaration)
+		customsDeclaration, err = shippoClient.CreateCustomsDeclaration(declaration)
 		if err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("error with creating customs declaration: %s", err.Error())
 		}
@@ -360,7 +360,7 @@ func init() {
 			"version": BuildVersion,
 		})
 	})
-	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(&shippoClient))
+	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(shippoClient))
 
 	ginLambda = ginadapter.New(r)
 }
