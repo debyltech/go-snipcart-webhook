@@ -270,14 +270,14 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
 			Name:             "VAT",
 			Amount:           event.Content.ItemsTotal * EUCountryVAT[strings.ToLower(taxAddress.Country)],
-			NumberForInvoice: fmt.Sprintf("VAT - %s", strings.ToUpper(taxAddress.Country)),
+			NumberForInvoice: fmt.Sprintf("%s - %d%%", strings.ToUpper(taxAddress.Country), int(EUCountryVAT[strings.ToLower(taxAddress.Country)]*100)),
 			Rate:             EUCountryVAT[strings.ToLower(taxAddress.Country)],
 		})
 	} else {
 		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
 			Name:             "NH Sales Tax",
 			Amount:           0.0,
-			NumberForInvoice: "NH",
+			NumberForInvoice: "0%",
 			Rate:             0.0,
 		})
 	}
