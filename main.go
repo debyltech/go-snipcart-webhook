@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,15 +27,15 @@ type WebhookEvent struct {
 }
 
 type ShippingRateFetchWebhookEvent struct {
-	EventName string                 `json:"eventName"`
-	CreatedOn time.Time              `json:"createdOn"`
-	Order     snipcart.SnipcartOrder `json:"content"`
+	EventName string         `json:"eventName"`
+	CreatedOn time.Time      `json:"createdOn"`
+	Order     snipcart.Order `json:"content"`
 }
 
 type OrderCompleteWebhookEvent struct {
-	EventName string                 `json:"eventName"`
-	CreatedOn time.Time              `json:"createdOn"`
-	Order     snipcart.SnipcartOrder `json:"content"`
+	EventName string         `json:"eventName"`
+	CreatedOn time.Time      `json:"createdOn"`
+	Order     snipcart.Order `json:"content"`
 }
 
 type ShippingRate struct {
@@ -49,30 +48,6 @@ type ShippingRate struct {
 
 type ShippingRatesResponse struct {
 	Rates []ShippingRate `json:"rates"`
-}
-
-func ValidateWebhook(token string, snipcartApiKey string) error {
-	validateRequest, err := http.NewRequest("GET", ValidateUrl+token, nil)
-	if err != nil {
-		return err
-	}
-
-	client := &http.Client{}
-
-	auth := base64.StdEncoding.EncodeToString([]byte(snipcartApiKey + ":"))
-	validateRequest.Header.Set("Authorization", fmt.Sprintf("Basic %s", auth))
-	validateRequest.Header.Set("Accept", "application/json")
-
-	validateResponse, err := client.Do(validateRequest)
-	if err != nil {
-		return fmt.Errorf("error validating webhook: %s", err.Error())
-	}
-
-	if validateResponse.StatusCode < 200 || validateResponse.StatusCode >= 300 {
-		return fmt.Errorf("non-2XX status code for validating webhook: %d", validateResponse.StatusCode)
-	}
-
-	return nil
 }
 
 func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, error) {
@@ -144,13 +119,22 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 
 		DebugPrintf("international country detected: %s\n", event.Order.Country)
 
+		/* Handle special Canadial EEL/PFC */
 		if strings.ToLower(event.Order.Country) == "ca" {
 			declaration.EELPFC = shippo.EEL_NOEEI3036
 		} else {
 			declaration.EELPFC = shippo.EEL_NOEEI3037a
 		}
 
-		// TODO(bastian): Add the TaxId override for EU/UK
+		/* Handle EU Countries */
+		if IsEUCountry(event.Order.Country) {
+			declaration.ExporterIdentification = shippo.ExporterIdentification{
+				TaxId: shippo.CustomsTaxId{
+					Number: webhookConfig.IOSS,
+					Type:   shippo.TAX_IOSS,
+				},
+			}
+		}
 
 		var err error
 		customsDeclaration, err = shippoClient.CreateCustomsDeclaration(declaration)
@@ -263,29 +247,53 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 	return http.StatusOK, nil
 }
 
-func HandleTaxCalculation(body io.ReadCloser) (*snipcart.SnipcartWebhookTaxResponse, error) {
-	taxes := snipcart.SnipcartWebhookTaxResponse{
-		Taxes: []snipcart.SnipcartTax{
-			{
-				Name:             "New Hampshire (company does not meet threshold for sales tax in your state)",
-				Amount:           0.00,
-				NumberForInvoice: "TAX-000",
-				Rate:             0.0,
-			},
-		},
+func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
+	var taxes snipcart.TaxResponse
+
+	var event snipcart.TaxWebhook
+	if err := json.NewDecoder(body).Decode(&event); err != nil {
+		return &taxes, fmt.Errorf("error with taxescalculate event decode: %s", err.Error())
 	}
 
+	var taxAddress *snipcart.Address = &event.Content.ShippingAddress
+
+	if event.Content.ShipToBillingAddress {
+		taxAddress = &event.Content.BillingAddress
+	}
+
+	DebugPrintf("successfully decoded webhook tax POST content -- state %s country %s\n", taxAddress.Province, taxAddress.Country)
+
+	/* Tax - EU */
+	if IsEUCountry(taxAddress.Country) {
+		DebugPrintf("detected EU country for Tax calculation: %s\n", taxAddress.Country)
+
+		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
+			Name:             "VAT",
+			Amount:           event.Content.ItemsTotal * EUCountryVAT[strings.ToLower(taxAddress.Country)],
+			NumberForInvoice: fmt.Sprintf("VAT - %s", strings.ToUpper(taxAddress.Country)),
+			Rate:             EUCountryVAT[strings.ToLower(taxAddress.Country)],
+		})
+	} else {
+		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
+			Name:             "NH Sales Tax",
+			Amount:           0.0,
+			NumberForInvoice: "NH",
+			Rate:             0.0,
+		})
+	}
+
+	DebugPrintf("finalized tax calculation for order %s\n", event.Content.Token)
 	return &taxes, nil
 }
 
-func RouteSnipcartWebhook(shippoClient *shippo.Client) gin.HandlerFunc {
+func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.Client) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
 			c.AbortWithError(http.StatusBadRequest, errors.New("missing X-Snipcart-RequestToken header"))
 			return
 		}
-		if err := ValidateWebhook(validationHeader, webhookConfig.SnipcartApiKey); err != nil {
+		if err := snipcartClient.ValidateWebhook(validationHeader); err != nil {
 			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
@@ -347,6 +355,7 @@ func init() {
 	}
 
 	shippoClient := shippo.NewClient(webhookConfig.ShippoApiKey)
+	snipcartClient := snipcart.NewClient(webhookConfig.SnipcartApiKey)
 
 	if webhookConfig.Production {
 		gin.SetMode(gin.ReleaseMode)
@@ -360,7 +369,7 @@ func init() {
 			"version": BuildVersion,
 		})
 	})
-	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(shippoClient))
+	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(shippoClient, snipcartClient))
 
 	ginLambda = ginadapter.New(r)
 }
