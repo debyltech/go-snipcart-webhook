@@ -29,7 +29,7 @@ steps:
     commands:
       - apk add zip
       - zip go-snipcart-webhook.zip go-snipcart-webhook
-      - aws lambda update-function-code --function-name go-snipcart-webhook --zip-file "fileb://go-snipcart-webhook.zip"
+      - aws lambda update-function-code --function-name snipcart-webhook-dev --zip-file "fileb://go-snipcart-webhook.zip"
     when:
       branch:
         - master
@@ -88,6 +88,6 @@ trigger:
  
 ---
 kind: signature
-hmac: d52ec322829270043f36d3ede5940dbdeecc58cb8213f9864de35e2b93560f79
+hmac: 9962e9186808fa38a441ed72198ef6672c923f60c8976ee960b3cd640eac68ca
 
 ...
