@@ -51,9 +51,38 @@ type ShippingRatesResponse struct {
 }
 
 func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, error) {
+	var err error
 	var event ShippingRateFetchWebhookEvent
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with shipping rate fetch event decode: %s", err.Error())
+	}
+
+	if webhookConfig.Production {
+		/* Validate Address */
+		var valid bool
+		valid, err = shippoClient.ValidateAddress(shippo.Address{
+			Name:       event.Order.ShippingAddress.Name,
+			Address1:   event.Order.ShippingAddress.Address1,
+			City:       event.Order.ShippingAddress.City,
+			Country:    event.Order.ShippingAddress.Country,
+			State:      event.Order.ShippingAddress.Province,
+			PostalCode: event.Order.ShippingAddress.PostalCode,
+			Email:      event.Order.Email,
+		})
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+
+		if !valid {
+			return snipcart.ShippingErrors{
+				Errors: []snipcart.ShippingError{
+					{
+						Key:     "invalid_address",
+						Message: "The address entered is not valid!",
+					},
+				},
+			}, nil
+		}
 	}
 
 	var lineItems []shippo.LineItem
@@ -179,7 +208,6 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		shipmentRequest.CustomsDeclaration = customsDeclaration.Id
 	}
 
-	var err error
 	var shipmentResponse *shippo.Shipment
 	// Check if we already have a shipment
 	if event.Order.ShippingRateId != "" {
