@@ -376,7 +376,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 func init() {
 	var err error
-	webhookConfig, err = config.NewConfigFromEnv(true)
+	webhookConfig, err = config.NewConfigFromEnv(false)
 	if err != nil {
 		DebugPrintf("[ERROR] %s\n", err.Error())
 		return
