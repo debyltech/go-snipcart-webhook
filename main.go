@@ -33,9 +33,9 @@ type ShippingRateFetchWebhookEvent struct {
 }
 
 type OrderCompleteWebhookEvent struct {
-	EventName string         `json:"eventName"`
-	CreatedOn time.Time      `json:"createdOn"`
-	Order     snipcart.Order `json:"content"`
+	EventName string    `json:"eventName"`
+	CreatedOn time.Time `json:"createdOn"`
+	Order     any       `json:"content"`
 }
 
 type ShippingRate struct {
@@ -272,6 +272,11 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
 	}
 
+	if !webhookConfig.Production {
+		jsonEvent, _ := json.Marshal(event)
+		DebugPrintln(string(jsonEvent))
+	}
+
 	return http.StatusOK, nil
 }
 
@@ -339,7 +344,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 		switch event.EventName {
 		case "order.completed":
-			DebugPrintf("handling event: %s\n", event.EventName)
+			fmt.Printf("handling event: %s\n", event.EventName)
 			statusCode, err := HandleOrderComplete(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
 				c.AbortWithError(statusCode, err)
@@ -348,7 +353,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 			c.Data(statusCode, gin.MIMEHTML, nil)
 		case "shippingrates.fetch":
-			DebugPrintf("handling event: %s\n", event.EventName)
+			fmt.Printf("handling event: %s\n", event.EventName)
 			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
@@ -357,7 +362,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 			c.JSON(http.StatusOK, response)
 		case "taxes.calculate":
-			DebugPrintf("handling event: %s\n", event.EventName)
+			fmt.Printf("handling event: %s\n", event.EventName)
 			response, err := HandleTaxCalculation(ioutil.NopCloser(bytes.NewBuffer(rawBody)))
 			if err != nil {
 				c.AbortWithError(http.StatusInternalServerError, err)
@@ -366,7 +371,8 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 			c.JSON(http.StatusOK, response)
 		default:
-			DebugPrintf("unhandled event: %s\n", event.EventName)
+			fmt.Printf("unhandled event: %s\n", event.EventName)
+			c.JSON(http.StatusOK, gin.H{})
 		}
 
 	}
