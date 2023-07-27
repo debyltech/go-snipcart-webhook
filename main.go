@@ -106,7 +106,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 
 		if strings.ToLower(event.Order.Country) != "us" {
 			// International
-			customsItem, err := shippoClient.CreateCustomsItem(shippo.CustomsItem{
+			customsItem := shippo.CustomsItem{
 				Description:   v.Name,
 				Quantity:      v.Quantity,
 				NetWeight:     fmt.Sprintf("%.2f", v.Weight),
@@ -115,12 +115,21 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 				ValueAmount:   fmt.Sprintf("%.2f", v.TotalPrice),
 				OriginCountry: webhookConfig.SenderAddress.Country,
 				Metadata:      fmt.Sprintf("order:%s", event.Order.Invoice),
-			})
+			}
+
+			// Handle tariff numbers
+			for _, f := range v.CustomFields {
+				if f.Name == "hs_code" {
+					customsItem.TariffNumber = f.Value
+				}
+			}
+
+			createCustomsItemResponse, err := shippoClient.CreateCustomsItem(customsItem)
 			if err != nil {
 				return http.StatusInternalServerError, fmt.Errorf("error with creating customs item: %s", err.Error())
 			}
 
-			customsItemIds = append(customsItemIds, customsItem.Id)
+			customsItemIds = append(customsItemIds, createCustomsItemResponse.Id)
 		}
 	}
 
