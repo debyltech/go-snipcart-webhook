@@ -58,8 +58,37 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	}
 
 	if webhookConfig.Production {
-		/* Validate Address */
 		var valid bool
+
+		// Ensure the name of the shipping address has at least two words
+		shippingAddressName := strings.Split(event.Order.ShippingAddress.Name, " ")
+		valid = len(shippingAddressName) > 1
+
+		if !valid {
+			return snipcart.ShippingErrors{
+				Errors: []snipcart.ShippingError{
+					{
+						Key:     "invalid_address_name",
+						Message: "Shipping Address name must be at least two words (ex. 'Jon D', 'Jon Doe')",
+					},
+				},
+			}, nil
+		}
+
+		// Ensure the first name of the shipping address has more than two characters
+		valid = len(shippingAddressName[0]) > 2
+		if !valid {
+			return snipcart.ShippingErrors{
+				Errors: []snipcart.ShippingError{
+					{
+						Key:     "invalid_address_firstname_length",
+						Message: "Shipping Address first name must be longer than two characters (ex: 'Jon')",
+					},
+				},
+			}, nil
+		}
+
+		// Validate address
 		valid, err = shippoClient.ValidateAddress(shippo.Address{
 			Name:       event.Order.ShippingAddress.Name,
 			Address1:   event.Order.ShippingAddress.Address1,
