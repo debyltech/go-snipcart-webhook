@@ -201,6 +201,8 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 					Type:   shippo.TAX_IOSS,
 				},
 			}
+
+			declaration.IsVatCollected = true
 		}
 
 		var err error
