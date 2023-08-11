@@ -203,7 +203,11 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			}
 
 			declaration.VatCollected = true
-			declaration.TotalTax = fmt.Sprintf("%.2f", event.Order.TotalTaxes)
+			declaration.InvoicedCharges = shippo.InvoicedCharges{
+				TotalShipping: fmt.Sprintf("%.2f", event.Order.ShippingCost),
+				TotalTaxes:    fmt.Sprintf("%.2f", event.Order.TotalTaxes),
+				Currency:      strings.ToUpper(event.Order.Currency),
+			}
 		}
 
 		var err error
