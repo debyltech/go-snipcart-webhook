@@ -202,7 +202,8 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 				},
 			}
 
-			declaration.IsVatCollected = true
+			declaration.VatCollected = true
+			declaration.TotalTax = fmt.Sprintf("%.2f", event.Order.TotalTaxes)
 		}
 
 		var err error
