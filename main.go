@@ -182,6 +182,13 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 					Type:   shippo.TAX_EIN,
 				},
 			},
+			InvoicedCharges: shippo.InvoicedCharges{
+				Currency:      strings.ToUpper(event.Order.Currency),
+				TotalShipping: fmt.Sprintf("%.2f", event.Order.ShippingCost),
+				TotalTaxes:    fmt.Sprintf("%.2f", event.Order.TotalTaxes),
+				TotalDuties:   "0.00",
+				OtherFees:     "0.00",
+			},
 		}
 
 		DebugPrintf("international country detected: %s\n", event.Order.Country)
@@ -203,19 +210,6 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			}
 
 			declaration.VatCollected = true
-
-			customsCurrency := strings.Trim(event.Order.Currency, " ")
-			if customsCurrency == "" {
-				customsCurrency = "USD"
-			}
-
-			declaration.InvoicedCharges = shippo.InvoicedCharges{
-				Currency:      strings.ToUpper(event.Order.Currency),
-				TotalShipping: fmt.Sprintf("%.2f", event.Order.ShippingCost),
-				TotalTaxes:    fmt.Sprintf("%.2f", event.Order.TotalTaxes),
-				TotalDuties:   "0.00",
-				OtherFees:     "0.00",
-			}
 		}
 
 		var err error
