@@ -33,9 +33,9 @@ type ShippingRateFetchWebhookEvent struct {
 }
 
 type OrderCompleteWebhookEvent struct {
-	EventName string    `json:"eventName"`
-	CreatedOn time.Time `json:"createdOn"`
-	Order     any       `json:"content"`
+	EventName string         `json:"eventName"`
+	CreatedOn time.Time      `json:"createdOn"`
+	Order     snipcart.Order `json:"content"`
 }
 
 type ShippingRate struct {
@@ -56,6 +56,8 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with shipping rate fetch event decode: %s", err.Error())
 	}
+
+	fmt.Printf("shippingrates.fetch: %s\n", event.Order.Token)
 
 	if webhookConfig.Production {
 		var valid bool
@@ -89,7 +91,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		}
 
 		// Validate address
-		valid, err = shippoClient.ValidateAddress(shippo.Address{
+		validationAddress := shippo.Address{
 			Name:       event.Order.ShippingAddress.Name,
 			Address1:   event.Order.ShippingAddress.Address1,
 			City:       event.Order.ShippingAddress.City,
@@ -97,20 +99,24 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			State:      event.Order.ShippingAddress.Province,
 			PostalCode: event.Order.ShippingAddress.PostalCode,
 			Email:      event.Order.Email,
-		})
-		if err != nil {
-			return http.StatusInternalServerError, err
 		}
 
-		if !valid {
-			return snipcart.ShippingErrors{
-				Errors: []snipcart.ShippingError{
-					{
-						Key:     "invalid_address",
-						Message: "The address entered is not valid!",
+		if !IsValidationWhitelisted(validationAddress) {
+			valid, err = shippoClient.ValidateAddress(validationAddress)
+			if err != nil {
+				return http.StatusInternalServerError, err
+			}
+
+			if !valid {
+				return snipcart.ShippingErrors{
+					Errors: []snipcart.ShippingError{
+						{
+							Key:     "invalid_address_validate",
+							Message: "The address entered failed address validation",
+						},
 					},
-				},
-			}, nil
+				}, nil
+			}
 		}
 	}
 
@@ -164,6 +170,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 
 	DebugPrintf("handled %d line items\n", len(lineItems))
 	if len(lineItems) <= 0 {
+		fmt.Printf("shippingrates.fetch: no shippable items for order\n")
 		return http.StatusOK, nil
 	}
 
@@ -278,7 +285,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	DebugPrintf("awaiting shipment creation succeessful...\n")
 	err = shippoClient.AwaitQueuedFinished(shipmentResponse.Id)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error with awaiting shipment status: %s\n", err.Error())
+		return http.StatusInternalServerError, fmt.Errorf("error with awaiting shipment status: %s", err.Error())
 	}
 
 	ratesResponse, err := shippoClient.GetRatesForShipmentId(shipmentResponse.Id)
@@ -308,7 +315,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		})
 	}
 
-	DebugPrintf("successful shipping rate response\n")
+	fmt.Printf("shippingrates.fetch: completed for %s\n", event.Order.Token)
 
 	return shippingRates, nil
 }
@@ -318,6 +325,8 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
 	}
+
+	fmt.Printf("order.completed: %s\n", event.Order.Token)
 
 	if !webhookConfig.Production {
 		jsonEvent, _ := json.Marshal(event)
@@ -334,6 +343,8 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return &taxes, fmt.Errorf("error with taxescalculate event decode: %s", err.Error())
 	}
+
+	fmt.Printf("taxes.calculate: %s\n", event.Content.Token)
 
 	var taxAddress *snipcart.Address = &event.Content.ShippingAddress
 
@@ -391,7 +402,6 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 		switch event.EventName {
 		case "order.completed":
-			fmt.Printf("handling event: %s\n", event.EventName)
 			statusCode, err := HandleOrderComplete(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
 				c.AbortWithError(statusCode, err)
@@ -400,25 +410,25 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 			c.Data(statusCode, gin.MIMEHTML, nil)
 		case "shippingrates.fetch":
-			fmt.Printf("handling event: %s\n", event.EventName)
 			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
+				fmt.Printf("[SHIPPING ERROR]: %s\n", err.Error())
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
 			}
 
 			c.JSON(http.StatusOK, response)
 		case "taxes.calculate":
-			fmt.Printf("handling event: %s\n", event.EventName)
 			response, err := HandleTaxCalculation(ioutil.NopCloser(bytes.NewBuffer(rawBody)))
 			if err != nil {
+				fmt.Printf("[TAX ERROR]: %s\n", err.Error())
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
 			}
 
 			c.JSON(http.StatusOK, response)
 		default:
-			fmt.Printf("unhandled event: %s\n", event.EventName)
+			fmt.Printf("UNHANDLED EVENT: %s\n", event.EventName)
 			c.JSON(http.StatusOK, gin.H{})
 		}
 
