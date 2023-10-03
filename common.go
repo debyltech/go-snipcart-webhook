@@ -1,14 +1,29 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
 	"github.com/debyltech/go-snipcart-webhook/config"
+	"github.com/gin-gonic/gin"
 )
+
+type JsonLogStatus string
+
+type JsonLog struct {
+	Status  JsonLogStatus `json:"status,omitempty"`
+	Event   string        `json:"event"`
+	Message string        `json:"message"`
+}
 
 const (
 	ValidateUrl string = "https://app.snipcart.com/api/requestvalidation/"
+
+	JsonLogStatusOk      JsonLogStatus = "ok"
+	JsonLogStatusWarning JsonLogStatus = "warning"
+	JsonLogStatusError   JsonLogStatus = "error"
 )
 
 var (
@@ -81,4 +96,34 @@ func IsEUCountry(countryCode string) bool {
 	}
 
 	return false
+}
+
+func jsonLoggerMiddleware() gin.HandlerFunc {
+	return gin.LoggerWithFormatter(
+		func(params gin.LogFormatterParams) string {
+			log := make(map[string]interface{})
+
+			log["status_code"] = params.StatusCode
+			log["path"] = params.Path
+			log["method"] = params.Method
+			log["start_time"] = params.TimeStamp.Format("2006/01/02 - 15:04:05")
+			log["response_time"] = params.Latency.String()
+
+			s, _ := json.Marshal(log)
+			return string(s) + "\n"
+		},
+	)
+}
+
+func logJsonWithStatus(status JsonLogStatus, event string, message string) {
+	logBytes, _ := json.Marshal(JsonLog{
+		Status:  status,
+		Event:   event,
+		Message: message,
+	})
+	fmt.Println(string(logBytes))
+}
+
+func logJson(event string, message string) {
+	logJsonWithStatus(JsonLogStatusOk, event, message)
 }

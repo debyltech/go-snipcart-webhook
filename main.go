@@ -57,7 +57,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		return http.StatusInternalServerError, fmt.Errorf("error with shipping rate fetch event decode: %s", err.Error())
 	}
 
-	fmt.Printf("shippingrates.fetch: %s\n", event.Order.Token)
+	logJson("shippingrates.fetch", event.Order.Token)
 
 	if webhookConfig.Production {
 		var valid bool
@@ -89,42 +89,13 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 				},
 			}, nil
 		}
-
-		// Validate address
-		validationAddress := shippo.Address{
-			Name:       event.Order.ShippingAddress.Name,
-			Address1:   event.Order.ShippingAddress.Address1,
-			City:       event.Order.ShippingAddress.City,
-			Country:    event.Order.ShippingAddress.Country,
-			State:      event.Order.ShippingAddress.Province,
-			PostalCode: event.Order.ShippingAddress.PostalCode,
-			Email:      event.Order.Email,
-		}
-
-		if !IsValidationWhitelisted(validationAddress) {
-			valid, err = shippoClient.ValidateAddress(validationAddress)
-			if err != nil {
-				return http.StatusInternalServerError, err
-			}
-
-			if !valid {
-				return snipcart.ShippingErrors{
-					Errors: []snipcart.ShippingError{
-						{
-							Key:     "invalid_address_validate",
-							Message: "The address entered failed address validation",
-						},
-					},
-				}, nil
-			}
-		}
 	}
 
 	var lineItems []shippo.LineItem
 	var customsItemIds []string
 	for _, v := range event.Order.Items {
 		if !v.Shippable {
-			DebugPrintf("order %s item %s not shippable, skipping\n", event.Order.Token, v.Name)
+			logJson("shippingratches.fetch", fmt.Sprintf("order %s item %s not shippable, skipping", event.Order.Token, v.Name))
 			continue
 		}
 
@@ -168,9 +139,9 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		}
 	}
 
-	DebugPrintf("handled %d line items\n", len(lineItems))
+	logJson("shippingrates.fetch", fmt.Sprintf("handled %d line items", len(lineItems)))
 	if len(lineItems) <= 0 {
-		fmt.Printf("shippingrates.fetch: no shippable items for order\n")
+		logJson("shippingrates.fetch", "no shippable items for order")
 		return http.StatusOK, nil
 	}
 
@@ -198,7 +169,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			},
 		}
 
-		DebugPrintf("international country detected: %s\n", event.Order.Country)
+		logJson("shippingrates.fetch", fmt.Sprintf("international country detected: %s", event.Order.Country))
 
 		/* Handle special Canadial EEL/PFC */
 		if strings.ToLower(event.Order.Country) == "ca" {
@@ -259,7 +230,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	}
 
 	if customsDeclaration != nil {
-		shipmentRequest.CustomsDeclaration = customsDeclaration.Id
+		shipmentRequest.CustomsDeclaration = customsDeclaration
 	}
 
 	var shipmentResponse *shippo.Shipment
@@ -271,7 +242,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			return http.StatusInternalServerError, fmt.Errorf("error with fetching existing shipment: %s", err.Error())
 		}
 	} else {
-		DebugPrintf("creating shipment\n")
+		DebugPrintf("creating shipment")
 		shipmentResponse, err = shippoClient.CreateShipment(shipmentRequest)
 		if err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
@@ -279,10 +250,10 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	}
 
 	if len(shipmentResponse.Messages) > 0 {
-		DebugPrintf("WARNING Shipment messages: %v\n", shipmentResponse.Messages)
+		DebugPrintf("WARNING Shipment messages: %v", shipmentResponse.Messages)
 	}
 
-	DebugPrintf("awaiting shipment creation succeessful...\n")
+	DebugPrintf("awaiting shipment creation succeessful...")
 	err = shippoClient.AwaitQueuedFinished(shipmentResponse.Id)
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with awaiting shipment status: %s", err.Error())
@@ -292,13 +263,13 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with getting rates: %s", err.Error())
 	}
-	DebugPrintf("got successful shipping rate response from shippo\n")
+	DebugPrintf("got successful shipping rate response from shippo")
 
-	DebugPrintf("creating shipping rates for snipcart...\n")
+	DebugPrintf("creating shipping rates for snipcart...")
 	var shippingRates ShippingRatesResponse
 	for _, rate := range ratesResponse.Rates {
 		if !webhookConfig.ServiceLevelAllowed(rate.ServiceLevel.Token) {
-			DebugPrintf("shipping rate service level '%s' skipped\n", rate.ServiceLevel.Token)
+			logJson("shippingates.fetch", fmt.Sprintf("skipped shipping service level '%s'", rate.ServiceLevel.Token))
 			continue
 		}
 
@@ -307,7 +278,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 			return nil, fmt.Errorf("error with parsing float in shipping rates: %s", err.Error())
 		}
 
-		DebugPrintf("adding shipping service level '%s' costing '%.2f'\n", rate.ServiceLevel.Name, cost)
+		logJson("shippingrates.fetch", fmt.Sprintf("adding shipping service level '%s' costing '%.2f' with id '%s;%s'", rate.ServiceLevel.Name, cost, shipmentResponse.Id, rate.Id))
 		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
 			Id:          fmt.Sprintf("%s;%s", shipmentResponse.Id, rate.Id),
 			Cost:        cost,
@@ -315,7 +286,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 		})
 	}
 
-	fmt.Printf("shippingrates.fetch: completed for %s\n", event.Order.Token)
+	logJson("shippingrates.fetch", fmt.Sprintf("completed for %s", event.Order.Token))
 
 	return shippingRates, nil
 }
@@ -326,7 +297,7 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
 	}
 
-	fmt.Printf("order.completed: %s\n", event.Order.Token)
+	logJson("order.completed", event.Order.Token)
 
 	if !webhookConfig.Production {
 		jsonEvent, _ := json.Marshal(event)
@@ -344,7 +315,7 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 		return &taxes, fmt.Errorf("error with taxescalculate event decode: %s", err.Error())
 	}
 
-	fmt.Printf("taxes.calculate: %s\n", event.Content.Token)
+	logJson("taxes.calculate", event.Content.Token)
 
 	var taxAddress *snipcart.Address = &event.Content.ShippingAddress
 
@@ -352,11 +323,11 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 		taxAddress = &event.Content.BillingAddress
 	}
 
-	DebugPrintf("successfully decoded webhook tax POST content -- state %s country %s\n", taxAddress.Province, taxAddress.Country)
+	DebugPrintf("successfully decoded webhook tax POST content -- state %s country %s", taxAddress.Province, taxAddress.Country)
 
 	/* Tax - EU */
 	if IsEUCountry(taxAddress.Country) {
-		DebugPrintf("detected EU country for Tax calculation: %s\n", taxAddress.Country)
+		DebugPrintf("detected EU country for Tax calculation: %s", taxAddress.Country)
 
 		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
 			Name:             "VAT",
@@ -373,7 +344,7 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 		})
 	}
 
-	DebugPrintf("finalized tax calculation for order %s\n", event.Content.Token)
+	DebugPrintf("finalized tax calculation for order %s", event.Content.Token)
 	return &taxes, nil
 }
 
@@ -388,7 +359,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
-		DebugPrintf("validated webhook '%s' successfully\n", validationHeader)
+		DebugPrintf("validated webhook '%s' successfully", validationHeader)
 
 		rawBody, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
@@ -412,7 +383,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 		case "shippingrates.fetch":
 			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
-				fmt.Printf("[SHIPPING ERROR]: %s\n", err.Error())
+				logJsonWithStatus(JsonLogStatusError, "SHIPPING ERROR", err.Error())
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
 			}
@@ -421,14 +392,14 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 		case "taxes.calculate":
 			response, err := HandleTaxCalculation(ioutil.NopCloser(bytes.NewBuffer(rawBody)))
 			if err != nil {
-				fmt.Printf("[TAX ERROR]: %s\n", err.Error())
+				logJsonWithStatus(JsonLogStatusError, "TAX ERROR", err.Error())
 				c.AbortWithError(http.StatusInternalServerError, err)
 				return
 			}
 
 			c.JSON(http.StatusOK, response)
 		default:
-			fmt.Printf("UNHANDLED EVENT: %s\n", event.EventName)
+			logJsonWithStatus(JsonLogStatusWarning, "UNHANDLED EVENT", event.EventName)
 			c.JSON(http.StatusOK, gin.H{})
 		}
 
@@ -441,7 +412,7 @@ func init() {
 	var err error
 	webhookConfig, err = config.NewConfigFromEnv(false)
 	if err != nil {
-		DebugPrintf("[ERROR] %s\n", err.Error())
+		DebugPrintf("[ERROR] %s", err.Error())
 		return
 	}
 
@@ -452,7 +423,9 @@ func init() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(jsonLoggerMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{

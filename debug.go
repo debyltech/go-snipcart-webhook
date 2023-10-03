@@ -6,12 +6,13 @@ import (
 
 func DebugPrintf(s string, a ...any) {
 	if !webhookConfig.Production {
-		fmt.Printf(s, a...)
+		logJson("debug", fmt.Sprintf(s, a...))
 	}
 }
 
 func DebugPrintln(a ...any) {
 	if !webhookConfig.Production {
 		fmt.Println(a...)
+		logJson("debug", fmt.Sprintln(a...))
 	}
 }
