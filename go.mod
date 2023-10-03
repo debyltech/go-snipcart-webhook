@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/aws/aws-lambda-go v1.19.1
 	github.com/awslabs/aws-lambda-go-api-proxy v0.14.0
-	github.com/debyltech/go-shippr v0.3.12
+	github.com/debyltech/go-shippr v0.3.13
 	github.com/debyltech/go-snipcart v0.3.12
 	github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3
 	github.com/gin-gonic/gin v1.9.0
@@ -14,7 +14,7 @@ require (
 require (
 	github.com/bytedance/sonic v1.8.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
-	github.com/debyltech/go-helpers v1.1.0 // indirect
+	github.com/debyltech/go-helpers v1.1.1 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
