@@ -372,14 +372,16 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 		}
 
 		switch event.EventName {
-		case "order.completed":
-			statusCode, err := HandleOrderComplete(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
-			if err != nil {
-				c.AbortWithError(statusCode, err)
-				return
-			}
+		/*
+			case "order.completed":
+				statusCode, err := HandleOrderComplete(io.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
+				if err != nil {
+					c.AbortWithError(statusCode, err)
+					return
+				}
 
-			c.Data(statusCode, gin.MIMEHTML, nil)
+				c.Data(statusCode, gin.MIMEHTML, nil)
+		*/
 		case "shippingrates.fetch":
 			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
 			if err != nil {
