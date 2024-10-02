@@ -75,7 +75,7 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 		},
 		Parcel: parcel,
 		TaxIdentifiers: []*easypost.TaxIdentifier{
-			&easypost.TaxIdentifier{
+			{
 				Entity:         TAXENT_SENDER,
 				TaxIdType:      "EIN",
 				IssuingCountry: "US",
