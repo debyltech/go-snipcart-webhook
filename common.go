@@ -60,6 +60,31 @@ var (
 		"es": 0.21, // Spain
 		"se": 0.25, // Sweden
 	}
+
+	// Non-delivery Options
+	NONDELIV_RETURN  string = "return"
+	NONDELIV_ABANDON string = "abandon"
+
+	// Customs Content Types
+	CONTYP_DOCS         string = "documents"
+	CONTYP_GIFT         string = "gift"
+	CONTYP_MERCH        string = "merchandise"
+	CONTYP_RETURN       string = "returned_goods"
+	CONTYP_SAMPLE       string = "sample"
+	CONTYP_DANGER       string = "dangerous_goods"
+	CONTYP_HUMANITARION string = "humanitarian_donation"
+	CONTYP_OTHER        string = "other"
+
+	// Customs Restriction Types
+	RSTRCTTYP_NONE       string = "none"
+	RSTRCTTYP_OTHER      string = "other"
+	RSTRCTTYP_QUARANTINE string = "quarantine"
+	RSTRCTTYP_SANITARY   string = "sanitary_phytosanitary_inspection"
+
+	// EEL/PFC Codes
+	EEL_NOEEI3037a string = "NOEEI 30.37(a)" // If value is less than $2500
+	EEL_NOEEI3037h string = "NOEEI 30.37(h)"
+	EEL_NOEEI3036  string = "NOEEI 30.36" // For Canada
 )
 
 func IsEUCountry(countryCode string) bool {
@@ -126,4 +151,8 @@ func logJsonWithStatus(status JsonLogStatus, event string, message string) {
 
 func logJson(event string, message string) {
 	logJsonWithStatus(JsonLogStatusOk, event, message)
+}
+
+func IsInternational(country string) bool {
+	return strings.ToLower(country) != "us"
 }

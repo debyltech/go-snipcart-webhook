@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EasyPost/easypost-go/v4"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
@@ -46,136 +47,41 @@ type ShippingRate struct {
 	// DeliveryDays int     `json:"guaranteedDaysToDelivery"`
 }
 
-type ShippingRatesResponse struct {
-	Rates []ShippingRate `json:"rates"`
-}
-
-func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, error) {
+func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (any, error) {
 	var err error
 	var event ShippingRateFetchWebhookEvent
+
+	// Decode the incoming json and check validity
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with shipping rate fetch event decode: %s", err.Error())
 	}
 
 	logJson("shippingrates.fetch", event.Order.Token)
 
-	if webhookConfig.Production {
-		var valid bool
-
-		// Ensure the name of the shipping address has at least two words
-		shippingAddressName := strings.Split(event.Order.ShippingAddress.Name, " ")
-		valid = len(shippingAddressName) > 1
-
-		if !valid {
-			return snipcart.ShippingErrors{
-				Errors: []snipcart.ShippingError{
-					{
-						Key:     "invalid_address_name",
-						Message: "Shipping Address name must be at least two words (ex. 'Jon D', 'Jon Doe')",
-					},
-				},
-			}, nil
-		}
-
-		// Ensure the first name of the shipping address has more than two characters
-		valid = len(shippingAddressName[0]) > 2
-		if !valid {
-			return snipcart.ShippingErrors{
-				Errors: []snipcart.ShippingError{
-					{
-						Key:     "invalid_address_firstname_length",
-						Message: "Shipping Address first name must be longer than two characters (ex: 'Jon')",
-					},
-				},
-			}, nil
-		}
+	// Validate Address Fields
+	if err := ValidateAddressFields(event.Order.ShippingAddress, webhookConfig.Production); err != nil {
+		return err, nil
 	}
 
-	var lineItems []shippo.LineItem
-	var customsItemIds []string
-	for _, v := range event.Order.Items {
-		if !v.Shippable {
-			logJson("shippingratches.fetch", fmt.Sprintf("order %s item %s not shippable, skipping", event.Order.Token, v.Name))
-			continue
+	// Get customs items if needed
+	if IsInternational(event.Order.ShippingAddress.Country) {
+		// TODO: move this to a func
+		customsItems := GenerateCustomsItems(event.Order)
+		var customsDeclaration *shippo.CustomsDeclaration
+
+		customsInfo := easypost.CustomsInfo{
+			CustomsCertify:    true,
+			CustomsSigner:     webhookConfig.CustomsVerifier,
+			RestrictionType:   RSTRCTTYP_NONE,
+			EELPFC:            EEL_NOEEI3037a,
+			CustomsItems:      customsItems,
+			NonDeliveryOption: NONDELIV_RETURN, // TODO: do we ever want to abandon?
+			ContentsType:      CONTYP_MERCH,
 		}
-
-		lineItems = append(lineItems, shippo.LineItem{
-			Quantity:           v.Quantity,
-			TotalPrice:         fmt.Sprintf("%.2f", v.TotalPrice),
-			Currency:           strings.ToUpper(event.Order.Currency),
-			Weight:             fmt.Sprintf("%.2f", v.Weight),
-			WeightUnit:         webhookConfig.WeightUnit,
-			Title:              v.Name,
-			ManufactureCountry: webhookConfig.ManufactureCountry,
-			Sku:                v.ID,
-		})
-
-		if strings.ToLower(event.Order.Country) != "us" {
-			// International
-			customsItem := shippo.CustomsItem{
-				Description:   v.Name,
-				Quantity:      v.Quantity,
-				NetWeight:     fmt.Sprintf("%.2f", v.Weight),
-				WeightUnit:    webhookConfig.WeightUnit,
-				Currency:      strings.ToUpper(event.Order.Currency),
-				ValueAmount:   fmt.Sprintf("%.2f", v.TotalPrice),
-				OriginCountry: webhookConfig.SenderAddress.Country,
-				Metadata:      fmt.Sprintf("order:%s", event.Order.Invoice),
-			}
-
-			// Handle tariff numbers
-			for _, f := range v.CustomFields {
-				if f.Name == "hs_code" {
-					customsItem.TariffNumber = f.Value
-				}
-			}
-
-			createCustomsItemResponse, err := shippoClient.CreateCustomsItem(customsItem)
-			if err != nil {
-				return http.StatusInternalServerError, fmt.Errorf("error with creating customs item: %s", err.Error())
-			}
-
-			customsItemIds = append(customsItemIds, createCustomsItemResponse.Id)
-		}
-	}
-
-	logJson("shippingrates.fetch", fmt.Sprintf("handled %d line items", len(lineItems)))
-	if len(lineItems) <= 0 {
-		logJson("shippingrates.fetch", "no shippable items for order")
-		return http.StatusOK, nil
-	}
-
-	var customsDeclaration *shippo.CustomsDeclaration
-	if strings.ToLower(event.Order.Country) != "us" {
-		declaration := shippo.CustomsDeclaration{
-			Certify:           true,
-			CertifySigner:     webhookConfig.CustomsVerifier,
-			Items:             customsItemIds,
-			NonDeliveryOption: shippo.NONDELIV_RETURN,
-			ContentsType:      shippo.CONTYP_MERCH,
-			Incoterm:          shippo.INCO_DDU,
-			ExporterIdentification: shippo.ExporterIdentification{
-				TaxId: shippo.CustomsTaxId{
-					Number: webhookConfig.EIN,
-					Type:   shippo.TAX_EIN,
-				},
-			},
-			InvoicedCharges: shippo.InvoicedCharges{
-				Currency:      strings.ToUpper(event.Order.Currency),
-				TotalShipping: fmt.Sprintf("%.2f", event.Order.ShippingCost),
-				TotalTaxes:    fmt.Sprintf("%.2f", event.Order.TotalTaxes),
-				TotalDuties:   "0.00",
-				OtherFees:     "0.00",
-			},
-		}
-
-		logJson("shippingrates.fetch", fmt.Sprintf("international country detected: %s", event.Order.Country))
 
 		/* Handle special Canadial EEL/PFC */
 		if strings.ToLower(event.Order.Country) == "ca" {
-			declaration.EELPFC = shippo.EEL_NOEEI3036
-		} else {
-			declaration.EELPFC = shippo.EEL_NOEEI3037a
+			customsInfo.EELPFC = EEL_NOEEI3036
 		}
 
 		/* Handle EU Countries */
@@ -198,7 +104,7 @@ func HandleShippingRates(body io.ReadCloser, shippoClient *shippo.Client) (any, 
 
 	}
 
-	parcel := webhookConfig.DefaultParcel
+	parcel := webhookConfig.Parcel
 	parcel.WeightUnit = webhookConfig.WeightUnit
 	parcel.DistanceUnit = webhookConfig.DimensionUnit
 	parcel.Weight = fmt.Sprintf("%.2f", event.Order.TotalWeight)
