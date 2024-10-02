@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
-	"github.com/debyltech/go-shippr/shippo"
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
 	"github.com/gin-gonic/gin"
@@ -39,14 +37,9 @@ type OrderCompleteWebhookEvent struct {
 	Order     snipcart.Order `json:"content"`
 }
 
-type ShippingRate struct {
-	Id          string  `json:"userDefinedId"`
-	Cost        float64 `json:"cost"`
-	Description string  `json:"description"`
-	// We cannot guarantee days to delivery, kept here for debug future
-	// DeliveryDays int     `json:"guaranteedDaysToDelivery"`
-}
-
+// HandleShippingRates goes through the order and creates a shipment, running
+// validations and adding information such as customs information on the way, or
+// uses an existing shipment to respond with a list of rates for Snipcart
 func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (any, error) {
 	var err error
 	var event ShippingRateFetchWebhookEvent
@@ -58,138 +51,71 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 
 	logJson("shippingrates.fetch", event.Order.Token)
 
-	// Validate Address Fields
+	// Validate Address Fields such as names being shorter than 2 letters, etc.
 	if err := ValidateAddressFields(event.Order.ShippingAddress, webhookConfig.Production); err != nil {
 		return err, nil
 	}
 
-	// Get customs items if needed
+	parcel := webhookConfig.DefaultParcel
+	parcel.Weight = event.Order.TotalWeight
+
+	shipment := easypost.Shipment{
+		FromAddress: webhookConfig.SenderAddress,
+		ToAddress: &easypost.Address{
+			Name:    event.Order.ShippingAddress.Name,
+			Company: event.Order.ShippingAddress.Company,
+			Street1: event.Order.ShippingAddress.Address1,
+			Street2: event.Order.ShippingAddress.Address2,
+			City:    event.Order.ShippingAddress.City,
+			Country: event.Order.ShippingAddress.Country,
+			State:   event.Order.ShippingAddress.Province,
+			Zip:     event.Order.ShippingAddress.PostalCode,
+			Phone:   event.Order.ShippingAddress.Phone,
+			Email:   event.Order.Email,
+		},
+		Parcel: parcel,
+		TaxIdentifiers: []*easypost.TaxIdentifier{
+			&easypost.TaxIdentifier{
+				Entity:         TAXENT_SENDER,
+				TaxIdType:      "EIN",
+				IssuingCountry: "US",
+			},
+		},
+	}
+	shipment.ReturnAddress = shipment.FromAddress
+
+	// Set international info
 	if IsInternational(event.Order.ShippingAddress.Country) {
-		// TODO: move this to a func
-		customsItems := GenerateCustomsItems(event.Order)
-		var customsDeclaration *shippo.CustomsDeclaration
-
-		customsInfo := easypost.CustomsInfo{
-			CustomsCertify:    true,
-			CustomsSigner:     webhookConfig.CustomsVerifier,
-			RestrictionType:   RSTRCTTYP_NONE,
-			EELPFC:            EEL_NOEEI3037a,
-			CustomsItems:      customsItems,
-			NonDeliveryOption: NONDELIV_RETURN, // TODO: do we ever want to abandon?
-			ContentsType:      CONTYP_MERCH,
-		}
-
-		/* Handle special Canadial EEL/PFC */
-		if strings.ToLower(event.Order.Country) == "ca" {
-			customsInfo.EELPFC = EEL_NOEEI3036
-		}
-
-		/* Handle EU Countries */
-		if IsEUCountry(event.Order.Country) {
-			declaration.ExporterIdentification = shippo.ExporterIdentification{
-				TaxId: shippo.CustomsTaxId{
-					Number: webhookConfig.IOSS,
-					Type:   shippo.TAX_IOSS,
-				},
-			}
-
-			declaration.VatCollected = true
-		}
-
-		var err error
-		customsDeclaration, err = shippoClient.CreateCustomsDeclaration(declaration)
-		if err != nil {
-			return http.StatusInternalServerError, fmt.Errorf("error with creating customs declaration: %s", err.Error())
-		}
-
+		SetInternationalInfo(&shipment, &event.Order)
 	}
 
-	parcel := webhookConfig.Parcel
-	parcel.WeightUnit = webhookConfig.WeightUnit
-	parcel.DistanceUnit = webhookConfig.DimensionUnit
-	parcel.Weight = fmt.Sprintf("%.2f", event.Order.TotalWeight)
+	// Create the shipping response object when creating a shipment
+	var shipmentResponse *easypost.Shipment
 
-	shipmentRequest := shippo.Shipment{
-		AddressFrom: shippo.Address{
-			Name:       webhookConfig.SenderAddress.Name,
-			Address1:   webhookConfig.SenderAddress.Address1,
-			Address2:   webhookConfig.SenderAddress.Address2,
-			City:       webhookConfig.SenderAddress.City,
-			State:      webhookConfig.SenderAddress.State,
-			Country:    webhookConfig.SenderAddress.Country,
-			PostalCode: webhookConfig.SenderAddress.PostalCode,
-			Phone:      webhookConfig.SenderAddress.Phone,
-		},
-		AddressTo: shippo.Address{
-			Name:       event.Order.ShippingAddress.Name,
-			Company:    event.Order.ShippingAddress.Company,
-			Address1:   event.Order.ShippingAddress.Address1,
-			Address2:   event.Order.ShippingAddress.Address2,
-			City:       event.Order.ShippingAddress.City,
-			Country:    event.Order.ShippingAddress.Country,
-			State:      event.Order.ShippingAddress.Province,
-			PostalCode: event.Order.ShippingAddress.PostalCode,
-			Phone:      event.Order.ShippingAddress.Phone,
-			Email:      event.Order.Email,
-		},
-		Parcels: []shippo.Parcel{*parcel},
-	}
-
-	if customsDeclaration != nil {
-		shipmentRequest.CustomsDeclaration = customsDeclaration
-	}
-
-	var shipmentResponse *shippo.Shipment
-	// Check if we already have a shipment
+	// Check if we already have a shipment, otherwise create a shipment
 	if event.Order.ShippingRateId != "" {
 		shipmentId := strings.Split(event.Order.ShippingRateId, ";")[0]
-		shipmentResponse, err = shippoClient.GetShipmentById(shipmentId)
+		shipmentResponse, err = easypostClient.GetShipment(shipmentId)
 		if err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("error with fetching existing shipment: %s", err.Error())
 		}
 	} else {
 		DebugPrintf("creating shipment")
-		shipmentResponse, err = shippoClient.CreateShipment(shipmentRequest)
+		shipmentResponse, err = easypostClient.CreateShipment(&shipment)
 		if err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
 		}
 	}
 
+	// Check any carrier messages
 	if len(shipmentResponse.Messages) > 0 {
 		DebugPrintf("WARNING Shipment messages: %v", shipmentResponse.Messages)
 	}
 
-	DebugPrintf("awaiting shipment creation succeessful...")
-	err = shippoClient.AwaitQueuedFinished(shipmentResponse.Id)
+	// Generate shipping rates
+	shippingRates, err := GenerateSnipcartRates(webhookConfig, shipmentResponse.Rates)
 	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error with awaiting shipment status: %s", err.Error())
-	}
-
-	ratesResponse, err := shippoClient.GetRatesForShipmentId(shipmentResponse.Id)
-	if err != nil {
-		return http.StatusInternalServerError, fmt.Errorf("error with getting rates: %s", err.Error())
-	}
-	DebugPrintf("got successful shipping rate response from shippo")
-
-	DebugPrintf("creating shipping rates for snipcart...")
-	var shippingRates ShippingRatesResponse
-	for _, rate := range ratesResponse.Rates {
-		if !webhookConfig.ServiceLevelAllowed(rate.ServiceLevel.Token) {
-			logJson("shippingates.fetch", fmt.Sprintf("skipped shipping service level '%s'", rate.ServiceLevel.Token))
-			continue
-		}
-
-		cost, err := strconv.ParseFloat(rate.Amount, 64)
-		if err != nil {
-			return nil, fmt.Errorf("error with parsing float in shipping rates: %s", err.Error())
-		}
-
-		logJson("shippingrates.fetch", fmt.Sprintf("adding shipping service level '%s' costing '%.2f' with id '%s;%s'", rate.ServiceLevel.Name, cost, shipmentResponse.Id, rate.Id))
-		shippingRates.Rates = append(shippingRates.Rates, ShippingRate{
-			Id:          fmt.Sprintf("%s;%s", shipmentResponse.Id, rate.Id),
-			Cost:        cost,
-			Description: fmt.Sprintf("%s %s - Estimated arrival in %d days", rate.Provider, rate.ServiceLevel.Name, rate.EstimatedDays),
-		})
+		return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
 	}
 
 	logJson("shippingrates.fetch", fmt.Sprintf("completed for %s", event.Order.Token))
@@ -197,7 +123,10 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 	return shippingRates, nil
 }
 
-func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, error) {
+// HandleOrderComplete handles the completion of the order and simply creates a
+// log message and a response code for Snipcart
+// TODO: Is this being used at all?
+func HandleOrderComplete(body io.ReadCloser) (int, error) {
 	var event OrderCompleteWebhookEvent
 	if err := json.NewDecoder(body).Decode(&event); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("error with ordercomplete event decode: %s", err.Error())
@@ -213,6 +142,9 @@ func HandleOrderComplete(body io.ReadCloser, shippoClient *shippo.Client) (int, 
 	return http.StatusOK, nil
 }
 
+// HandleTaxCalculation returns a list of taxes that need to be applied to an
+// existing order as part of checkout for customers. This primarily has to do
+// with international Value Added Tax, but may pertain to sales tax as well.
 func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 	var taxes snipcart.TaxResponse
 
@@ -242,6 +174,7 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 			Rate:             EUCountryVAT[strings.ToLower(taxAddress.Country)],
 		})
 	} else {
+		// TODO: Make this customizable in the future? Not everyone is from NH
 		taxes.Taxes = append(taxes.Taxes, snipcart.Tax{
 			Name:             "NH Sales Tax",
 			Amount:           0.0,
@@ -254,7 +187,10 @@ func HandleTaxCalculation(body io.ReadCloser) (*snipcart.TaxResponse, error) {
 	return &taxes, nil
 }
 
-func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.Client) gin.HandlerFunc {
+// RouteSnipcartWebhook routes the webhook request, after validating the
+// Snipcart RequestToken, to it's relevant location (i.e. tax, order complete,
+// etc.)
+func RouteSnipcartWebhook(easypostClient *easypost.Client, snipcartClient *snipcart.Client) gin.HandlerFunc {
 	fn := func(c *gin.Context) {
 		validationHeader := c.GetHeader("X-Snipcart-RequestToken")
 		if validationHeader == "" {
@@ -279,8 +215,9 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 
 		switch event.EventName {
 		/*
+			// TODO: Why does this no longer exist?
 			case "order.completed":
-				statusCode, err := HandleOrderComplete(io.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
+				statusCode, err := HandleOrderComplete(io.NopCloser(bytes.NewBuffer(rawBody)), easypostClient)
 				if err != nil {
 					c.AbortWithError(statusCode, err)
 					return
@@ -289,7 +226,7 @@ func RouteSnipcartWebhook(shippoClient *shippo.Client, snipcartClient *snipcart.
 				c.Data(statusCode, gin.MIMEHTML, nil)
 		*/
 		case "shippingrates.fetch":
-			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), shippoClient)
+			response, err := HandleShippingRates(ioutil.NopCloser(bytes.NewBuffer(rawBody)), easypostClient)
 			if err != nil {
 				logJsonWithStatus(JsonLogStatusError, "SHIPPING ERROR", err.Error())
 				c.AbortWithError(http.StatusInternalServerError, err)
@@ -324,7 +261,7 @@ func init() {
 		return
 	}
 
-	shippoClient := shippo.NewClient(webhookConfig.ShippoApiKey)
+	easypostClient := easypost.New(webhookConfig.EasypostApiKey)
 	snipcartClient := snipcart.NewClient(webhookConfig.SnipcartApiKey)
 
 	if webhookConfig.Production {
@@ -341,7 +278,7 @@ func init() {
 			"version": BuildVersion,
 		})
 	})
-	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(shippoClient, snipcartClient))
+	r.POST("/webhooks/snipcart", RouteSnipcartWebhook(easypostClient, snipcartClient))
 
 	ginLambda = ginadapter.New(r)
 }

@@ -3,11 +3,11 @@ package main
 import (
 	"strings"
 
-	"github.com/debyltech/go-shippr/shippo"
+	"github.com/EasyPost/easypost-go/v4"
 	"github.com/debyltech/go-snipcart/snipcart"
 )
 
-func IsValidationWhitelisted(address shippo.Address) bool {
+func IsValidationWhitelisted(address easypost.Address) bool {
 	// Romania
 	if strings.EqualFold(strings.ToLower(address.State), "if") && strings.EqualFold(strings.ToLower(address.Country), "ro") {
 		return true

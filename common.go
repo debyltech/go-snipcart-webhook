@@ -85,6 +85,10 @@ var (
 	EEL_NOEEI3037a string = "NOEEI 30.37(a)" // If value is less than $2500
 	EEL_NOEEI3037h string = "NOEEI 30.37(h)"
 	EEL_NOEEI3036  string = "NOEEI 30.36" // For Canada
+
+	// Tax Identifier Entities
+	TAXENT_SENDER   string = "SENDER"
+	TAXENT_RECEIVER string = "RECEIVER"
 )
 
 func IsEUCountry(countryCode string) bool {
