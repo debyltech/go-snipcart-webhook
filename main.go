@@ -51,6 +51,8 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 
 	logJson("shippingrates.fetch", event.Order.Token)
 
+	DebugPrintMarshalJson("shippingrates.fetch.order", event.Order)
+
 	// Validate Address Fields such as names being shorter than 2 letters, etc.
 	if err := ValidateAddressFields(event.Order.ShippingAddress, webhookConfig.Production); err != nil {
 		return err, nil
