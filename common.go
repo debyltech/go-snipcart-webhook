@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
@@ -159,4 +160,10 @@ func logJson(event string, message string) {
 
 func IsInternational(country string) bool {
 	return strings.ToLower(country) != "us"
+}
+
+// WeightGramToOunce converts weight in grams to weight in ounces, rounded to
+// two decimal points
+func WeightGramToOunce(weightInGrams float64) float64 {
+	return math.Round((weightInGrams/28.35)*100) / 100
 }

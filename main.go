@@ -57,7 +57,8 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 	}
 
 	parcel := webhookConfig.DefaultParcel
-	parcel.Weight = event.Order.TotalWeight
+	parcel.Weight = WeightGramToOunce(event.Order.TotalWeight)
+	DebugPrintMarshalJson("shippingrates.fetch.parcel", parcel)
 
 	shipment := easypost.Shipment{
 		FromAddress: webhookConfig.SenderAddress,
@@ -77,12 +78,14 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 		TaxIdentifiers: []*easypost.TaxIdentifier{
 			{
 				Entity:         TAXENT_SENDER,
-				TaxIdType:      "EIN",
 				IssuingCountry: "US",
+				TaxId:          webhookConfig.EIN,
+				TaxIdType:      "EIN",
 			},
 		},
 	}
 	shipment.ReturnAddress = shipment.FromAddress
+	DebugPrintMarshalJson("shippingrates.fetch.shipment", shipment)
 
 	// Set international info
 	if IsInternational(event.Order.ShippingAddress.Country) {
@@ -106,6 +109,7 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 			return http.StatusInternalServerError, fmt.Errorf("error with creating shipment: %s", err.Error())
 		}
 	}
+	DebugPrintMarshalJson("shippingrates.fetch.shipment.created", shipmentResponse)
 
 	// Check any carrier messages
 	if len(shipmentResponse.Messages) > 0 {

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/EasyPost/easypost-go/v4"
@@ -28,11 +29,13 @@ type Config struct {
 	DefaultParcelJson string `env:"GSW_PARCEL_JSON,required"`
 	DefaultParcel     *easypost.Parcel
 
-	RateServiceLevels     string `env:"GSW_SERVICELEVELS" envDefault:"usps_first"`
-	RateServiceLevelsList []string
-	VAT                   string `env:"GSW_VAT,unset"`
-	IOSS                  string `env:"GSW_IOSS,unset"`
-	CustomsVerifier       string `env:"GSW_CUSTOMSVERIFIER,unset"`
+	AllowedCarriers string `env:"GSW_ALLOWED_CARRIERS" envDefault:"USPS"`
+
+	ShippingDiscount int `env:"GSW_SHIP_DISCOUNT" envDefault:"0"`
+
+	VAT             string `env:"GSW_VAT,unset"`
+	IOSS            string `env:"GSW_IOSS,unset"`
+	CustomsVerifier string `env:"GSW_CUSTOMSVERIFIER,unset"`
 }
 
 type WebhookSmsSecret struct {
@@ -40,15 +43,8 @@ type WebhookSmsSecret struct {
 	EasypostApiKey string `json:"easypost_api_key"`
 }
 
-func (c *Config) ServiceLevelAllowed(carrier string, serviceLevel string) bool {
-	for _, v := range c.RateServiceLevelsList {
-		carrierServiceLevel := strings.Split(v, ":")
-		if carrierServiceLevel[0] == carrier && carrierServiceLevel[1] == serviceLevel {
-			return true
-		}
-	}
-
-	return false
+func (c *Config) CarrierAllowed(carrier string) bool {
+	return slices.Contains(strings.Split(c.AllowedCarriers, ","), carrier)
 }
 
 func NewConfigFromFile(filePath string) (*Config, error) {
@@ -71,8 +67,6 @@ func NewConfigFromEnv(useAwsSms bool) (*Config, error) {
 	if err := env.Parse(&config); err != nil {
 		return &Config{}, err
 	}
-
-	config.RateServiceLevelsList = strings.Split(config.RateServiceLevels, ",")
 
 	var senderAddress easypost.Address
 	if err := json.Unmarshal([]byte(config.SenderAddressJson), &senderAddress); err != nil {
