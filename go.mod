@@ -5,13 +5,14 @@ go 1.19
 require (
 	github.com/aws/aws-lambda-go v1.19.1
 	github.com/awslabs/aws-lambda-go-api-proxy v0.14.0
-	github.com/debyltech/go-shippr v0.3.13
+	github.com/debyltech/go-shippr v0.4.1
 	github.com/debyltech/go-snipcart v0.3.12
 	github.com/debyltech/go-snipcart-webhook/config v0.0.0-20230228012951-a1671f047ec3
 	github.com/gin-gonic/gin v1.9.0
 )
 
 require (
+	github.com/EasyPost/easypost-go/v4 v4.0.0 // indirect
 	github.com/bytedance/sonic v1.8.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/debyltech/go-helpers v1.1.1 // indirect
@@ -21,6 +22,8 @@ require (
 	github.com/go-playground/validator/v10 v10.11.2 // indirect
 	github.com/goccy/go-json v0.10.0 // indirect
 	github.com/google/go-cmp v0.5.8 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
@@ -35,7 +38,7 @@ require (
 	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/text v0.11.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

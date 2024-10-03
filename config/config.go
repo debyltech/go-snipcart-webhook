@@ -5,27 +5,31 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/EasyPost/easypost-go/v4"
 	"github.com/aws/aws-secretsmanager-caching-go/secretcache"
 	"github.com/caarlos0/env/v7"
-	"github.com/debyltech/go-shippr/shippo"
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	SnipcartApiKey        string `env:"SNIPCART_API_KEY,unset"`
-	ShippoApiKey          string `env:"SHIPPO_API_KEY,unset"`
-	WeightUnit            string `env:"GSW_WEIGHT_UNIT" envDefault:"g"`
-	DimensionUnit         string `env:"GSW_DIM_UNIT" envDefault:"cm"`
-	ManufactureCountry    string `env:"GSW_MFGR_COUNTRY" envDefault:"US"`
-	SenderAddressJson     string `env:"GSW_SENDER_JSON,required"`
-	SenderAddress         *shippo.Address
-	DefaultParcelJson     string `env:"GSW_PARCEL_JSON,required"`
-	DefaultParcel         *shippo.Parcel
-	Production            bool   `env:"GSW_PRODUCTION" envDefault:"false"`
-	AwsSmsArn             string `env:"GSW_SMS_SECRET_ARN,unset"`
+	EIN string `env:"GSW_EIN,unset"`
+
+	SnipcartApiKey string `env:"SNIPCART_API_KEY,unset"`
+	EasypostApiKey string `env:"EASPOST_API_KEY,unset"`
+
+	AwsSmsArn string `env:"GSW_SMS_SECRET_ARN,unset"`
+
+	Production bool `env:"GSW_PRODUCTION" envDefault:"false"`
+
+	ManufactureCountry string `env:"GSW_MFGR_COUNTRY" envDefault:"US"`
+	SenderAddressJson  string `env:"GSW_SENDER_JSON,required"`
+	SenderAddress      *easypost.Address
+
+	DefaultParcelJson string `env:"GSW_PARCEL_JSON,required"`
+	DefaultParcel     *easypost.Parcel
+
 	RateServiceLevels     string `env:"GSW_SERVICELEVELS" envDefault:"usps_first"`
 	RateServiceLevelsList []string
-	EIN                   string `env:"GSW_EIN,unset"`
 	VAT                   string `env:"GSW_VAT,unset"`
 	IOSS                  string `env:"GSW_IOSS,unset"`
 	CustomsVerifier       string `env:"GSW_CUSTOMSVERIFIER,unset"`
@@ -33,12 +37,13 @@ type Config struct {
 
 type WebhookSmsSecret struct {
 	SnipcartApiKey string `json:"snipcart_api_key"`
-	ShippoApiKey   string `json:"shippo_api_key"`
+	EasypostApiKey string `json:"easypost_api_key"`
 }
 
-func (c *Config) ServiceLevelAllowed(serviceLevel string) bool {
+func (c *Config) ServiceLevelAllowed(carrier string, serviceLevel string) bool {
 	for _, v := range c.RateServiceLevelsList {
-		if serviceLevel == v {
+		carrierServiceLevel := strings.Split(v, ":")
+		if carrierServiceLevel[0] == carrier && carrierServiceLevel[1] == serviceLevel {
 			return true
 		}
 	}
@@ -69,13 +74,13 @@ func NewConfigFromEnv(useAwsSms bool) (*Config, error) {
 
 	config.RateServiceLevelsList = strings.Split(config.RateServiceLevels, ",")
 
-	var senderAddress shippo.Address
+	var senderAddress easypost.Address
 	if err := json.Unmarshal([]byte(config.SenderAddressJson), &senderAddress); err != nil {
 		return &config, err
 	}
 	config.SenderAddress = &senderAddress
 
-	var defaultParcel shippo.Parcel
+	var defaultParcel easypost.Parcel
 	if err := json.Unmarshal([]byte(config.DefaultParcelJson), &defaultParcel); err != nil {
 		return &config, err
 	}
@@ -90,16 +95,16 @@ func NewConfigFromEnv(useAwsSms bool) (*Config, error) {
 		var webhookSmsSecret WebhookSmsSecret
 		secretString, err := secretCache.GetSecretString(config.AwsSmsArn)
 		if err != nil {
-			return &config, fmt.Errorf("issue with GetSecretString: %s\n", err.Error())
+			return &config, fmt.Errorf("issue with GetSecretString: %s", err.Error())
 		}
 
 		err = json.Unmarshal([]byte(secretString), &webhookSmsSecret)
 		if err != nil {
-			return &config, fmt.Errorf("issue with unmarshal: %s\n", err.Error())
+			return &config, fmt.Errorf("issue with unmarshal: %s", err.Error())
 		}
 
 		config.SnipcartApiKey = webhookSmsSecret.SnipcartApiKey
-		config.ShippoApiKey = webhookSmsSecret.ShippoApiKey
+		config.EasypostApiKey = webhookSmsSecret.EasypostApiKey
 	}
 
 	return &config, nil
