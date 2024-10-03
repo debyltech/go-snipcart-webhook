@@ -15,7 +15,7 @@ type Config struct {
 	EIN string `env:"GSW_EIN,unset"`
 
 	SnipcartApiKey string `env:"SNIPCART_API_KEY,unset"`
-	EasypostApiKey string `env:"EASPOST_API_KEY,unset"`
+	EasypostApiKey string `env:"EASYPOST_API_KEY,unset"`
 
 	AwsSmsArn string `env:"GSW_SMS_SECRET_ARN,unset"`
 
