@@ -139,7 +139,7 @@ func GenerateSnipcartRates(config *config.Config, rates []*easypost.Rate) (*Ship
 		}
 
 		ratesResponse.Rates = append(ratesResponse.Rates, ShippingRate{
-			Id:          fmt.Sprintf("%s;%s", rate.ShipmentID, rate.ID),
+			Id:          rate.ID,
 			Cost:        DiscountedCost(cost, config.ShippingDiscount),
 			Description: ShippingRateDescription(rate.Carrier, rate.Service, rate.EstDeliveryDays),
 		})

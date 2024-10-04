@@ -99,8 +99,12 @@ func HandleShippingRates(body io.ReadCloser, easypostClient *easypost.Client) (a
 
 	// Check if we already have a shipment, otherwise create a shipment
 	if event.Order.ShippingRateId != "" {
-		shipmentId := strings.Split(event.Order.ShippingRateId, ";")[0]
-		shipmentResponse, err = easypostClient.GetShipment(shipmentId)
+		shipmentRate, err := easypostClient.GetRate(event.Order.ShippingRateId)
+		if err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("error with fetching existing shipments rate: %s", err.Error())
+		}
+
+		shipmentResponse, err = easypostClient.GetShipment(shipmentRate.ShipmentID)
 		if err != nil {
 			return http.StatusInternalServerError, fmt.Errorf("error with fetching existing shipment: %s", err.Error())
 		}
