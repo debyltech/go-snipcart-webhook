@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/EasyPost/easypost-go/v4"
 	"github.com/debyltech/go-snipcart-webhook/config"
 	"github.com/debyltech/go-snipcart/snipcart"
@@ -22,6 +25,40 @@ type ShippingRate struct {
 
 type ShippingRatesResponse struct {
 	Rates []ShippingRate `json:"rates"`
+}
+
+func CarrierRename(carrier string) string {
+	switch carrier {
+	case "UPSDAP":
+		return "UPS"
+	}
+
+	return carrier
+}
+
+func CarrierServiceNameCleanup(carrier string, service string) string {
+	cleanedService := service
+
+	switch carrier {
+	case "FedEx":
+		cleanedService = strings.ReplaceAll(cleanedService, "FEDEX_", "")
+	case "UPS":
+		cleanedService = strings.ReplaceAll(cleanedService, "UPS", "")
+	}
+
+	return cleanedService
+}
+
+func FormatRateServiceName(service string) string {
+	// Regex to add and replace camelcase with spaces between camelcase words
+	// for readability
+	serviceRe := regexp.MustCompile(`([a-z])([A-Z])`)
+	serviceSpaced := strings.ReplaceAll(service, "_", " ")
+	serviceUncameled := serviceRe.ReplaceAllString(serviceSpaced, "$1 $2")
+	serviceLowered := strings.ToLower(serviceUncameled)
+
+	serviceTitleCase := cases.Title(language.English)
+	return serviceTitleCase.String(serviceLowered)
 }
 
 func GenerateCustomsItems(order *snipcart.Order) []*easypost.CustomsItem {
@@ -104,17 +141,21 @@ func DiscountedCost(shippingCost float64, discount int) float64 {
 // form a valid description by adding spaces to the upper camel case of the
 // service level from EasyPost and appends an estimated days message if estimate
 // provided
-func ShippingRateDescription(carrier string, service string, estimatedDays int) string {
-	// Regex to add and replace camelcase with spaces between camelcase words
-	// for readability
-	serviceRe := regexp.MustCompile(`([a-z])([A-Z])`)
-	prettyService := serviceRe.ReplaceAllString(service, "$1 $2")
+func ShippingRateDescription(carrier string, service string, deliveryDays int, guaranteedDelivery bool) string {
+	carrierRenamed := CarrierRename(carrier)
+	serviceCleaned := CarrierServiceNameCleanup(carrierRenamed, service)
+	serviceFormatted := FormatRateServiceName(serviceCleaned)
 
-	description := fmt.Sprintf("%s %s", carrier, prettyService)
+	description := fmt.Sprintf("%s %s", carrierRenamed, serviceFormatted)
 
-	if estimatedDays > 0 {
+	if deliveryDays > 0 {
 		// Add estimation to description if provided
-		description = fmt.Sprintf("%s - Estimated arrival %d days", description, estimatedDays)
+		arrivalGuarantee := "Estimated"
+		if guaranteedDelivery {
+			arrivalGuarantee = "Guaranteed"
+		}
+
+		description = fmt.Sprintf("%s - %s arrival %d days", description, arrivalGuarantee, deliveryDays)
 	}
 
 	return description
@@ -141,7 +182,7 @@ func GenerateSnipcartRates(config *config.Config, rates []*easypost.Rate) (*Ship
 		ratesResponse.Rates = append(ratesResponse.Rates, ShippingRate{
 			Id:          rate.ID,
 			Cost:        DiscountedCost(cost, config.ShippingDiscount),
-			Description: ShippingRateDescription(rate.Carrier, rate.Service, rate.EstDeliveryDays),
+			Description: ShippingRateDescription(rate.Carrier, rate.Service, rate.EstDeliveryDays, rate.DeliveryDateGuaranteed),
 		})
 	}
 
