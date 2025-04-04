@@ -40,7 +40,7 @@ var (
 		"cy": 0.19,  // Cyprus
 		"cz": 0.21,  // Czech Republic
 		"dk": 0.25,  // Denmark
-		"ee": 0.20,  // Estonia
+		"ee": 0.22,  // Estonia
 		"fi": 0.255, // Finland
 		"fr": 0.20,  // France
 		"de": 0.19,  // Germany
@@ -50,13 +50,13 @@ var (
 		"it": 0.22,  // Italy
 		"lv": 0.21,  // Latvia
 		"lt": 0.21,  // Lithuania
-		"lu": 0.16,  // Luxembourg
+		"lu": 0.17,  // Luxembourg
 		"mt": 0.18,  // Malta
 		"nl": 0.21,  // Netherlands
 		"pl": 0.23,  // Poland
 		"pt": 0.23,  // Portugal
 		"ro": 0.19,  // Romania
-		"sk": 0.20,  // Slovakia
+		"sk": 0.23,  // Slovakia
 		"si": 0.22,  // Slovenia
 		"es": 0.21,  // Spain
 		"se": 0.25,  // Sweden
